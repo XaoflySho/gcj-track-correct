@@ -32,12 +32,31 @@ python correct_tracks.py \
 
 可选：`--no-dedupe` 保留转换后与邻点几乎重合的点。
 
+## 自动 QA（推荐纠偏后跑）
+
+对比原始与纠偏结果，检查误伤、路径回退，并跑固定回归日；**常驻点（家/公司）从数据自动发现，支持搬家多址**，无需写死家坐标。
+
+```bash
+python qa_tracks.py \
+  --original 2026.01.01-2026.12.31.csv \
+  --corrected output/2026.01.01-2026.12.31_corrected.csv \
+  --output-dir output/
+```
+
+可选：`--home lon,lat` 可重复追加人工锚点；`--no-auto-home` 关闭自动发现。
+
+输出：`output/<stem>_qa_report.md`（中文）。全部硬检查通过 → exit `0`；失败 → exit `1`。残留的模糊 GCJ 跳变以 **警告** 列出，不导致失败（硬门禁为日常零改、常驻不外漂、位移形态、路径质量与回归用例）。
+
 ## 其它年份
 
 只要 CSV 列名与一生足迹导出一致（含 `dataTime,longitude,latitude,speed,...`），即可：
 
 ```bash
 python correct_tracks.py --input 2023.01.01-2023.12.31.csv --output-dir output/
+python qa_tracks.py \
+  --original 2023.01.01-2023.12.31.csv \
+  --corrected output/2023.01.01-2023.12.31_corrected.csv \
+  --output-dir output/
 ```
 
 ## 说明

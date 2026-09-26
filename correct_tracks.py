@@ -27,6 +27,8 @@ from lib.detect import (
     path_stats,
     segment_indices,
 )
+from lib.detect import _gcj_runs
+from lib.qa_anchors import discover_stay_anchors, near_any_anchor
 
 
 FIELDNAMES = [
@@ -84,25 +86,25 @@ def build_report(
     seg_summaries: List[dict],
 ) -> str:
     lines = [
-        f"# Trajectory correction report",
+        "# 轨迹纠偏报告",
         "",
-        f"- Input: `{input_name}`",
-        f"- Points in: **{total_in}**",
-        f"- Points out: **{total_out}**",
-        f"- Converted GCJ→WGS: **{fixed_total}**",
-        f"- Near-duplicate removed: **{removed_total}**",
+        f"- 输入文件：`{input_name}`",
+        f"- 输入点数：**{total_in}**",
+        f"- 输出点数：**{total_out}**",
+        f"- GCJ→WGS 转换点数：**{fixed_total}**",
+        f"- 近重复删除点数：**{removed_total}**",
         "",
-        "## Segments with corrections",
+        "## 发生纠偏的行程",
         "",
     ]
 
     corrected_segs = [s for s in seg_summaries if s["fixed"] > 0 or s["removed"] > 0]
     if not corrected_segs:
-        lines.append("_No GCJ contamination detected._")
+        lines.append("_未检测到 GCJ 污染。_")
     else:
         lines.append(
-            "| Start (CST) | End | n_in | n_out | fixed | removed | "
-            "switches | max_spd m/s | max_step before→after |"
+            "| 开始（CST） | 结束 | 输入点数 | 输出点数 | 转换 | 删除 | "
+            "切换次数 | 最高速 m/s | 最大步进 修前→修后 |"
         )
         lines.append(
             "|---|---|---:|---:|---:|---:|---:|---:|---|"
@@ -117,7 +119,7 @@ def build_report(
     lines.extend(
         [
             "",
-            "## Top driving segments by GCJ switches (incl. unfixed if any)",
+            "## 驾车行程按 GCJ 切换次数排序（含未改动的）",
             "",
         ]
     )
@@ -126,12 +128,17 @@ def build_report(
         key=lambda x: (-x["switches"], -x["fixed"]),
     )[:20]
     if not top:
-        lines.append("_No driving segments._")
+        lines.append("_无驾车行程。_")
     else:
-        lines.append("| Start (CST) | n | switches | fixed | max_spd | kind |")
+        lines.append("| 开始（CST） | 点数 | 切换次数 | 转换点数 | 最高速 | 状态 |")
         lines.append("|---|---:|---:|---:|---:|---|")
         for s in top:
-            kind = "corrected" if s["fixed"] else ("clean" if s["switches"] == 0 else "detected")
+            if s["fixed"]:
+                kind = "已纠偏"
+            elif s["switches"] == 0:
+                kind = "干净"
+            else:
+                kind = "已检测未改"
             lines.append(
                 f"| {s['t0']} | {s['n_in']} | {s['switches']} | {s['fixed']} | "
                 f"{s['max_spd']:.1f} | {kind} |"
@@ -148,6 +155,8 @@ def process(
 ) -> Tuple[List[dict], List[dict], int, int]:
     times = [p.t for p in points]
     segs_idx = segment_indices(times)
+    # Never convert points near auto-discovered stay anchors (homes / offices).
+    anchors = discover_stay_anchors(points)
 
     out_rows: List[dict] = []
     summaries: List[dict] = []
@@ -161,9 +170,24 @@ def process(
         before_coords = [(p.lon, p.lat) for p in seg_points]
         _, _, max_before = path_stats(before_coords)
 
-        if result.is_drive and result.gcj_count > 0:
+        labels = list(result.labels)
+        if anchors and result.gcj_count > 0:
+            # Drop whole GCJ runs that touch a stay anchor — never punch holes
+            # in a block (partial convert makes paths worse, e.g. 2025-02-05).
+            for start, end in _gcj_runs(labels):
+                if any(
+                    near_any_anchor(seg_points[i].lon, seg_points[i].lat, anchors)
+                    for i in range(start, end)
+                ):
+                    for i in range(start, end):
+                        labels[i] = "W"
+            if not any(lab == "G" for lab in labels):
+                labels = ["U"] * len(labels)
+
+        gcj_count = sum(1 for lab in labels if lab == "G")
+        if result.is_drive and gcj_count > 0:
             corrected, fixed, removed = correct_points(
-                seg_points, result.labels, dedupe=dedupe
+                seg_points, labels, dedupe=dedupe
             )
         else:
             corrected = seg_points
