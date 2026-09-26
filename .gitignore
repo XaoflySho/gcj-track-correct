@@ -1,0 +1,14 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.Python
+
+# Tool outputs and large track CSVs
+output/
+*.csv
+
+# OS
+.DS_Store
