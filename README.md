@@ -47,6 +47,20 @@ python qa_tracks.py \
 
 输出：`output/<stem>_qa_report.md`（中文）。全部硬检查通过 → exit `0`；失败 → exit `1`。残留的模糊 GCJ 跳变以 **警告** 列出，不导致失败（硬门禁为日常零改、常驻不外漂、位移形态、路径质量与回归用例）。
 
+## 地图预览（目视验偏）
+
+按时间窗生成可双击打开的 Leaflet HTML：灰色=原始，蓝色=纠偏，橙色=改动点。底图为 **OpenStreetMap（WGS-84）**，与纠偏坐标一致。**请勿用高德/腾讯网页直接贴 WGS 点**（其底图是 GCJ，会整轨假偏移）。
+
+```bash
+python view_tracks.py \
+  --original 2025.01.01-2025.12.31.csv \
+  --corrected output/2025.01.01-2025.12.31_corrected.csv \
+  --from "2025-01-04 10:50" --to "2025-01-04 11:20" \
+  --out output/preview_20250104.html
+```
+
+也可用 `--day 2025-01-04` 预览整天。必须指定时间范围（全年点过多，不宜一次渲染）。浏览器打开 HTML 时需能访问 OSM 瓦片与 Leaflet CDN。
+
 ## 其它年份
 
 只要 CSV 列名与一生足迹导出一致（含 `dataTime,longitude,latitude,speed,...`），即可：
