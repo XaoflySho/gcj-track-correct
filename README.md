@@ -49,7 +49,15 @@ python qa_tracks.py \
 
 ## 地图预览（目视验偏）
 
-按时间窗生成可双击打开的 Leaflet HTML：灰色=原始，蓝色=纠偏，橙色=改动点。底图为 **OpenStreetMap（WGS-84）**，与纠偏坐标一致。**请勿用高德/腾讯网页直接贴 WGS 点**（其底图是 GCJ，会整轨假偏移）。
+**推荐：纯网页，无需起服务器。** 用浏览器打开仓库根目录的 [`track_viewer.html`](track_viewer.html)，选择原始 CSV 与纠偏 CSV，再选日期（可选起止时分），点「显示」即可对比。灰色=原始，蓝色=纠偏，橙色=改动点。底图为 **OpenStreetMap（WGS-84）**。
+
+注意：
+
+- 浏览器不能自动读磁盘路径，需手动选文件；选一次后换日期不必重选
+- **请勿用高德/腾讯网页直接贴 WGS 点**（其底图是 GCJ，会整轨假偏移）
+- 打开页面时需能访问 OSM 瓦片与 Leaflet CDN
+
+备选：脚本按时间窗导出静态 HTML
 
 ```bash
 python view_tracks.py \
@@ -59,7 +67,7 @@ python view_tracks.py \
   --out output/preview_20250104.html
 ```
 
-也可用 `--day 2025-01-04` 预览整天。必须指定时间范围（全年点过多，不宜一次渲染）。浏览器打开 HTML 时需能访问 OSM 瓦片与 Leaflet CDN。
+也可用 `--day 2025-01-04`。全年点过多，CLI 与网页都建议按天或更短窗口查看。
 
 ## 其它年份
 

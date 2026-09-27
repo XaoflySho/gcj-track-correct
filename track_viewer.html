@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>轨迹纠偏对比预览</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin="" />
+  <style>
+    html, body { margin: 0; height: 100%; font-family: "PingFang SC", "Helvetica Neue", sans-serif; }
+    #map { position: absolute; inset: 0; }
+    .panel {
+      position: absolute; z-index: 1100; top: 12px; left: 12px;
+      background: rgba(255,255,255,0.96); padding: 12px 14px; border-radius: 8px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.18); width: min(380px, 92vw);
+      font-size: 13px; line-height: 1.45; color: #222;
+      max-height: calc(100vh - 24px); overflow-y: auto;
+    }
+    .panel h1 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+    .row { margin: 6px 0; }
+    .row label { display: block; font-size: 12px; color: #555; margin-bottom: 2px; }
+    .row input[type="file"],
+    .row input[type="date"],
+    .row input[type="time"] { width: 100%; box-sizing: border-box; }
+    .time-row { display: flex; gap: 8px; }
+    .time-row > div { flex: 1; }
+    .actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+    button#btnShow {
+      background: #1a73e8; color: #fff; border: none; border-radius: 6px;
+      padding: 7px 14px; font-size: 13px; cursor: pointer;
+    }
+    button#btnShow:disabled { opacity: 0.5; cursor: not-allowed; }
+    #status { font-size: 12px; color: #444; margin-top: 8px; white-space: pre-wrap; }
+    #status.warn { color: #a65c00; }
+    #status.err { color: #b00020; }
+    .legend { margin-top: 10px; padding-top: 8px; border-top: 1px solid #e5e5e5; }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+    .swatch { width: 22px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .dot.hollow { background: transparent; border: 2px solid #888; box-sizing: border-box; }
+    .note { margin-top: 8px; color: #666; font-size: 11px; }
+    .file-name { font-size: 11px; color: #666; margin-top: 2px; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>轨迹纠偏对比预览</h1>
+    <div class="row">
+      <label for="fileOrig">原始 CSV</label>
+      <input type="file" id="fileOrig" accept=".csv,text/csv" />
+      <div class="file-name" id="nameOrig">未选择</div>
+    </div>
+    <div class="row">
+      <label for="fileCorr">纠偏 CSV</label>
+      <input type="file" id="fileCorr" accept=".csv,text/csv" />
+      <div class="file-name" id="nameCorr">未选择</div>
+    </div>
+    <div class="row">
+      <label for="day">日期（CST）</label>
+      <input type="date" id="day" required />
+    </div>
+    <div class="row time-row">
+      <div>
+        <label for="timeFrom">开始时间（可选）</label>
+        <input type="time" id="timeFrom" />
+      </div>
+      <div>
+        <label for="timeTo">结束时间（可选）</label>
+        <input type="time" id="timeTo" />
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" id="btnShow">显示</button>
+    </div>
+    <div id="status">请选择原始与纠偏 CSV，再选日期后点击「显示」。</div>
+    <div class="legend">
+      <div class="legend-row"><span class="swatch" style="background:#888;opacity:0.7"></span>原始轨迹</div>
+      <div class="legend-row"><span class="swatch" style="background:#1a73e8"></span>纠偏轨迹</div>
+      <div class="legend-row"><span class="dot" style="background:#f09000"></span>改动点（≥5 m）</div>
+      <div class="legend-row"><span class="dot hollow"></span>删除点（近重复去除）</div>
+      <p class="note">底图 OpenStreetMap（WGS-84）。请勿用高德/腾讯底图直接贴 WGS 点。浏览器无法自动读磁盘路径，需手动选文件。</p>
+    </div>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""></script>
+  <script>
+(function () {
+  const MIN_SHIFT_M = 5;
+  const POINT_WARN_LIMIT = 8000;
+  const CST_OFFSET_MS = 8 * 3600 * 1000;
+
+  const cache = { original: null, corrected: null };
+  let map = null;
+  let layerGroup = null;
+
+  const el = {
+    fileOrig: document.getElementById("fileOrig"),
+    fileCorr: document.getElementById("fileCorr"),
+    nameOrig: document.getElementById("nameOrig"),
+    nameCorr: document.getElementById("nameCorr"),
+    day: document.getElementById("day"),
+    timeFrom: document.getElementById("timeFrom"),
+    timeTo: document.getElementById("timeTo"),
+    btnShow: document.getElementById("btnShow"),
+    status: document.getElementById("status"),
+  };
+
+  function setStatus(text, kind) {
+    el.status.textContent = text;
+    el.status.className = kind || "";
+  }
+
+  function initMap() {
+    map = L.map("map", {
+      preferCanvas: true,
+      zoomControl: false,
+    }).setView([34.2, 108.9], 12);
+    L.control.zoom({ position: "topright" }).addTo(map);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(map);
+    layerGroup = L.layerGroup().addTo(map);
+  }
+
+  function haversineM(lon1, lat1, lon2, lat2) {
+    const R = 6371000;
+    const toRad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * toRad;
+    const dLon = (lon2 - lon1) * toRad;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function fmtCst(ts) {
+    const d = new Date(ts * 1000 + CST_OFFSET_MS);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    const ss = String(d.getUTCSeconds()).padStart(2, "0");
+    return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+  }
+
+  /** CST calendar day → [t0, t1) unix seconds */
+  function windowFromDay(dayStr) {
+    const [y, m, d] = dayStr.split("-").map(Number);
+    const t0 = Date.UTC(y, m - 1, d, 0, 0, 0) / 1000 - 8 * 3600;
+    const t1 = t0 + 86400;
+    return { t0, t1, endExclusive: true };
+  }
+
+  /** Optional HH:MM on a CST day → inclusive window */
+  function windowFromDayAndTimes(dayStr, fromHHMM, toHHMM) {
+    const [y, m, d] = dayStr.split("-").map(Number);
+    const dayStart = Date.UTC(y, m - 1, d, 0, 0, 0) / 1000 - 8 * 3600;
+    function parseHM(hm) {
+      const [hh, mm] = hm.split(":").map(Number);
+      return dayStart + hh * 3600 + mm * 60;
+    }
+    let t0 = parseHM(fromHHMM);
+    let t1 = parseHM(toHHMM) + 59; // include whole end minute
+    if (t1 < t0) throw new Error("结束时间不能早于开始时间");
+    return { t0, t1, endExclusive: false };
+  }
+
+  function parseCsvText(text) {
+    const lines = text.split(/\r?\n/);
+    if (!lines.length) throw new Error("空文件");
+    const header = lines[0].split(",");
+    const idxT = header.indexOf("dataTime");
+    const idxLon = header.indexOf("longitude");
+    const idxLat = header.indexOf("latitude");
+    if (idxT < 0 || idxLon < 0 || idxLat < 0) {
+      throw new Error("缺少列 dataTime / longitude / latitude");
+    }
+    const points = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
+      const cols = line.split(",");
+      if (cols.length <= Math.max(idxT, idxLon, idxLat)) continue;
+      const t = parseInt(cols[idxT], 10);
+      const lon = parseFloat(cols[idxLon]);
+      const lat = parseFloat(cols[idxLat]);
+      if (!Number.isFinite(t) || !Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+      points.push({ t, lon, lat });
+    }
+    return points;
+  }
+
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error("读取失败"));
+      reader.readAsText(file, "UTF-8");
+    });
+  }
+
+  async function loadSide(input, cacheKey, nameEl) {
+    const file = input.files && input.files[0];
+    if (!file) {
+      cache[cacheKey] = null;
+      nameEl.textContent = "未选择";
+      return;
+    }
+    nameEl.textContent = file.name + "（解析中…）";
+    setStatus("正在解析 " + file.name + " …");
+    const text = await readFileAsText(file);
+    const points = parseCsvText(text);
+    cache[cacheKey] = points;
+    nameEl.textContent = file.name + "（" + points.length.toLocaleString() + " 点）";
+    setStatus("已加载 " + file.name + "：" + points.length.toLocaleString() + " 点。选好日期后点「显示」。");
+  }
+
+  function filterByTime(points, t0, t1, endExclusive) {
+    if (endExclusive) return points.filter((p) => p.t >= t0 && p.t < t1);
+    return points.filter((p) => p.t >= t0 && p.t <= t1);
+  }
+
+  function alignTracks(original, corrected) {
+    const byT = new Map();
+    for (const p of corrected) byT.set(p.t, p);
+    const changed = [];
+    const removed = [];
+    for (const p of original) {
+      const q = byT.get(p.t);
+      if (!q) {
+        removed.push({ lat: p.lat, lon: p.lon, t: p.t, time_cst: fmtCst(p.t) });
+        continue;
+      }
+      const shift = haversineM(p.lon, p.lat, q.lon, q.lat);
+      if (shift >= MIN_SHIFT_M) {
+        changed.push({
+          lat: q.lat,
+          lon: q.lon,
+          orig_lat: p.lat,
+          orig_lon: p.lon,
+          t: p.t,
+          time_cst: fmtCst(p.t),
+          shift_m: Math.round(shift * 10) / 10,
+        });
+      }
+    }
+    return {
+      originalLatLngs: original.map((p) => [p.lat, p.lon]),
+      correctedLatLngs: corrected.map((p) => [p.lat, p.lon]),
+      changed,
+      removed,
+      nOriginal: original.length,
+      nCorrected: corrected.length,
+    };
+  }
+
+  function clearLayers() {
+    layerGroup.clearLayers();
+  }
+
+  function drawView(view) {
+    clearLayers();
+    const bounds = [];
+
+    if (view.originalLatLngs.length) {
+      L.polyline(view.originalLatLngs, {
+        color: "#888",
+        weight: 4,
+        opacity: 0.55,
+      }).addTo(layerGroup);
+      view.originalLatLngs.forEach((ll) => bounds.push(ll));
+    }
+    if (view.correctedLatLngs.length) {
+      L.polyline(view.correctedLatLngs, {
+        color: "#1a73e8",
+        weight: 4,
+        opacity: 0.9,
+      }).addTo(layerGroup);
+      view.correctedLatLngs.forEach((ll) => bounds.push(ll));
+    }
+    for (const p of view.changed) {
+      const m = L.circleMarker([p.lat, p.lon], {
+        radius: 5,
+        color: "#c06000",
+        fillColor: "#f09000",
+        fillOpacity: 0.9,
+        weight: 1,
+      }).addTo(layerGroup);
+      m.bindPopup(
+        "<b>改动点</b><br/>" +
+          p.time_cst +
+          "<br/>位移 " +
+          p.shift_m +
+          " m<br/>原 " +
+          p.orig_lat.toFixed(6) +
+          ", " +
+          p.orig_lon.toFixed(6) +
+          "<br/>新 " +
+          p.lat.toFixed(6) +
+          ", " +
+          p.lon.toFixed(6)
+      );
+      bounds.push([p.lat, p.lon]);
+    }
+    for (const p of view.removed) {
+      const m = L.circleMarker([p.lat, p.lon], {
+        radius: 4,
+        color: "#666",
+        fillColor: "transparent",
+        fillOpacity: 0,
+        weight: 2,
+      }).addTo(layerGroup);
+      m.bindPopup("<b>删除点</b><br/>" + p.time_cst);
+      bounds.push([p.lat, p.lon]);
+    }
+
+    if (bounds.length) {
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+  }
+
+  function showOnMap() {
+    if (!cache.original || !cache.corrected) {
+      setStatus("请先选择并等待原始、纠偏两个 CSV 解析完成。", "err");
+      return;
+    }
+    const day = el.day.value;
+    if (!day) {
+      setStatus("请选择日期。", "err");
+      return;
+    }
+
+    const from = el.timeFrom.value;
+    const to = el.timeTo.value;
+    let win;
+    try {
+      if (from || to) {
+        if (!from || !to) {
+          setStatus("起止时间需同时填写，或都留空以显示整天。", "err");
+          return;
+        }
+        win = windowFromDayAndTimes(day, from, to);
+      } else {
+        win = windowFromDay(day);
+      }
+    } catch (e) {
+      setStatus(String(e.message || e), "err");
+      return;
+    }
+
+    const original = filterByTime(cache.original, win.t0, win.t1, win.endExclusive);
+    const corrected = filterByTime(cache.corrected, win.t0, win.t1, win.endExclusive);
+    if (!original.length && !corrected.length) {
+      clearLayers();
+      setStatus("该时间窗内无点。", "err");
+      return;
+    }
+
+    const nPts = Math.max(original.length, corrected.length);
+    const view = alignTracks(original, corrected);
+    drawView(view);
+
+    let msg =
+      "原始 " +
+      view.nOriginal +
+      " 点 · 纠偏 " +
+      view.nCorrected +
+      " 点 · 改动 " +
+      view.changed.length +
+      " · 删除 " +
+      view.removed.length;
+    if (nPts > POINT_WARN_LIMIT) {
+      msg +=
+        "\n警告：点数 > " +
+        POINT_WARN_LIMIT +
+        "，浏览器可能较卡，建议缩小时间范围。";
+      setStatus(msg, "warn");
+    } else {
+      setStatus(msg);
+    }
+  }
+
+  el.fileOrig.addEventListener("change", async () => {
+    try {
+      el.btnShow.disabled = true;
+      await loadSide(el.fileOrig, "original", el.nameOrig);
+    } catch (e) {
+      cache.original = null;
+      el.nameOrig.textContent = "解析失败";
+      setStatus("原始 CSV：" + (e.message || e), "err");
+    } finally {
+      el.btnShow.disabled = false;
+    }
+  });
+
+  el.fileCorr.addEventListener("change", async () => {
+    try {
+      el.btnShow.disabled = true;
+      await loadSide(el.fileCorr, "corrected", el.nameCorr);
+    } catch (e) {
+      cache.corrected = null;
+      el.nameCorr.textContent = "解析失败";
+      setStatus("纠偏 CSV：" + (e.message || e), "err");
+    } finally {
+      el.btnShow.disabled = false;
+    }
+  });
+
+  el.btnShow.addEventListener("click", showOnMap);
+
+  initMap();
+})();
+  </script>
+</body>
+</html>
