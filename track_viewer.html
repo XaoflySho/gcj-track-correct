@@ -23,8 +23,10 @@
     .row input[type="file"],
     .row input[type="date"],
     .row input[type="time"] { width: 100%; box-sizing: border-box; }
-    .time-row { display: flex; gap: 8px; }
-    .time-row > div { flex: 1; }
+    .dt-row { display: flex; gap: 8px; align-items: flex-end; }
+    .dt-row .date-field { flex: 1.4; }
+    .dt-row .time-field { flex: 1; }
+    .hint { font-size: 11px; color: #888; margin-top: 2px; }
     .actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
     button#btnShow {
       background: #1a73e8; color: #fff; border: none; border-radius: 6px;
@@ -47,39 +49,53 @@
   <div class="panel">
     <h1>轨迹纠偏对比预览</h1>
     <div class="row">
-      <label for="fileOrig">原始 CSV</label>
+      <label for="fileOrig">原始 CSV（可选）</label>
       <input type="file" id="fileOrig" accept=".csv,text/csv" />
       <div class="file-name" id="nameOrig">未选择</div>
     </div>
     <div class="row">
-      <label for="fileCorr">纠偏 CSV</label>
+      <label for="fileCorr">纠偏 CSV（可选）</label>
       <input type="file" id="fileCorr" accept=".csv,text/csv" />
       <div class="file-name" id="nameCorr">未选择</div>
     </div>
     <div class="row">
-      <label for="day">日期（CST）</label>
-      <input type="date" id="day" required />
+      <label>开始（CST）</label>
+      <div class="dt-row">
+        <div class="date-field">
+          <label for="dateFrom">日期</label>
+          <input type="date" id="dateFrom" required />
+        </div>
+        <div class="time-field">
+          <label for="clockFrom">时分（可选）</label>
+          <input type="time" id="clockFrom" step="60" />
+        </div>
+      </div>
+      <div class="hint">不填时分则从当天 00:00 起</div>
     </div>
-    <div class="row time-row">
-      <div>
-        <label for="timeFrom">开始时间（可选）</label>
-        <input type="time" id="timeFrom" />
+    <div class="row">
+      <label>结束（CST）</label>
+      <div class="dt-row">
+        <div class="date-field">
+          <label for="dateTo">日期</label>
+          <input type="date" id="dateTo" required />
+        </div>
+        <div class="time-field">
+          <label for="clockTo">时分（可选）</label>
+          <input type="time" id="clockTo" step="60" />
+        </div>
       </div>
-      <div>
-        <label for="timeTo">结束时间（可选）</label>
-        <input type="time" id="timeTo" />
-      </div>
+      <div class="hint">不填时分则到当天 23:59；跨度 ≤ 31 天</div>
     </div>
     <div class="actions">
       <button type="button" id="btnShow">显示</button>
     </div>
-    <div id="status">请选择原始与纠偏 CSV，再选日期后点击「显示」。</div>
+    <div id="status">请至少选择一个 CSV，再选起止日期后点击「显示」。</div>
     <div class="legend">
       <div class="legend-row"><span class="swatch" style="background:#888;opacity:0.7"></span>原始轨迹</div>
       <div class="legend-row"><span class="swatch" style="background:#1a73e8"></span>纠偏轨迹</div>
       <div class="legend-row"><span class="dot" style="background:#f09000"></span>改动点（≥5 m）</div>
       <div class="legend-row"><span class="dot hollow"></span>删除点（近重复去除）</div>
-      <p class="note">底图 OpenStreetMap（WGS-84）。请勿用高德/腾讯底图直接贴 WGS 点。浏览器无法自动读磁盘路径，需手动选文件。</p>
+      <p class="note">底图 OpenStreetMap（WGS-84）。原始/纠偏可只选一个；两边都选时才显示改动点与删除点。请勿用高德/腾讯底图直接贴 WGS 点。</p>
     </div>
   </div>
   <div id="map"></div>
@@ -91,6 +107,7 @@
 (function () {
   const MIN_SHIFT_M = 5;
   const POINT_WARN_LIMIT = 8000;
+  const MAX_SPAN_S = 31 * 86400; // 不超过约一个月
   const CST_OFFSET_MS = 8 * 3600 * 1000;
 
   const cache = { original: null, corrected: null };
@@ -102,9 +119,10 @@
     fileCorr: document.getElementById("fileCorr"),
     nameOrig: document.getElementById("nameOrig"),
     nameCorr: document.getElementById("nameCorr"),
-    day: document.getElementById("day"),
-    timeFrom: document.getElementById("timeFrom"),
-    timeTo: document.getElementById("timeTo"),
+    dateFrom: document.getElementById("dateFrom"),
+    dateTo: document.getElementById("dateTo"),
+    clockFrom: document.getElementById("clockFrom"),
+    clockTo: document.getElementById("clockTo"),
     btnShow: document.getElementById("btnShow"),
     status: document.getElementById("status"),
   };
@@ -149,25 +167,40 @@
     return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
   }
 
-  /** CST calendar day → [t0, t1) unix seconds */
-  function windowFromDay(dayStr) {
-    const [y, m, d] = dayStr.split("-").map(Number);
-    const t0 = Date.UTC(y, m - 1, d, 0, 0, 0) / 1000 - 8 * 3600;
-    const t1 = t0 + 86400;
-    return { t0, t1, endExclusive: true };
+  /** day YYYY-MM-DD + optional HH:MM as CST → unix seconds */
+  function parseCstDateTime(dayStr, clockStr, endOfDay) {
+    const dm = dayStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!dm) throw new Error("日期格式无效");
+    const y = Number(dm[1]);
+    const mo = Number(dm[2]);
+    const d = Number(dm[3]);
+    let hh = 0;
+    let mm = 0;
+    let ss = 0;
+    if (clockStr) {
+      const tm = clockStr.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
+      if (!tm) throw new Error("时分格式无效");
+      hh = Number(tm[1]);
+      mm = Number(tm[2]);
+      ss = tm[3] != null ? Number(tm[3]) : 0;
+      // minute precision at end: include the whole minute
+      if (!tm[3] && endOfDay) ss = 59;
+    } else if (endOfDay) {
+      hh = 23;
+      mm = 59;
+      ss = 59;
+    }
+    return Date.UTC(y, mo - 1, d, hh, mm, ss) / 1000 - 8 * 3600;
   }
 
-  /** Optional HH:MM on a CST day → inclusive window */
-  function windowFromDayAndTimes(dayStr, fromHHMM, toHHMM) {
-    const [y, m, d] = dayStr.split("-").map(Number);
-    const dayStart = Date.UTC(y, m - 1, d, 0, 0, 0) / 1000 - 8 * 3600;
-    function parseHM(hm) {
-      const [hh, mm] = hm.split(":").map(Number);
-      return dayStart + hh * 3600 + mm * 60;
-    }
-    let t0 = parseHM(fromHHMM);
-    let t1 = parseHM(toHHMM) + 59; // include whole end minute
+  /** Inclusive CST range from separate date + optional time; span ≤ 31 days */
+  function windowFromParts(dateFrom, clockFrom, dateTo, clockTo) {
+    const t0 = parseCstDateTime(dateFrom, clockFrom || "", false);
+    const t1 = parseCstDateTime(dateTo, clockTo || "", true);
     if (t1 < t0) throw new Error("结束时间不能早于开始时间");
+    if (t1 - t0 > MAX_SPAN_S) {
+      throw new Error("时间跨度不能超过 31 天，请缩小范围");
+    }
     return { t0, t1, endExclusive: false };
   }
 
@@ -218,7 +251,7 @@
     const points = parseCsvText(text);
     cache[cacheKey] = points;
     nameEl.textContent = file.name + "（" + points.length.toLocaleString() + " 点）";
-    setStatus("已加载 " + file.name + "：" + points.length.toLocaleString() + " 点。选好日期后点「显示」。");
+    setStatus("已加载 " + file.name + "：" + points.length.toLocaleString() + " 点。选好起止日期后点「显示」。");
   }
 
   function filterByTime(points, t0, t1, endExclusive) {
@@ -227,27 +260,30 @@
   }
 
   function alignTracks(original, corrected) {
-    const byT = new Map();
-    for (const p of corrected) byT.set(p.t, p);
     const changed = [];
     const removed = [];
-    for (const p of original) {
-      const q = byT.get(p.t);
-      if (!q) {
-        removed.push({ lat: p.lat, lon: p.lon, t: p.t, time_cst: fmtCst(p.t) });
-        continue;
-      }
-      const shift = haversineM(p.lon, p.lat, q.lon, q.lat);
-      if (shift >= MIN_SHIFT_M) {
-        changed.push({
-          lat: q.lat,
-          lon: q.lon,
-          orig_lat: p.lat,
-          orig_lon: p.lon,
-          t: p.t,
-          time_cst: fmtCst(p.t),
-          shift_m: Math.round(shift * 10) / 10,
-        });
+    // Diff markers only when both sides are present.
+    if (original.length && corrected.length) {
+      const byT = new Map();
+      for (const p of corrected) byT.set(p.t, p);
+      for (const p of original) {
+        const q = byT.get(p.t);
+        if (!q) {
+          removed.push({ lat: p.lat, lon: p.lon, t: p.t, time_cst: fmtCst(p.t) });
+          continue;
+        }
+        const shift = haversineM(p.lon, p.lat, q.lon, q.lat);
+        if (shift >= MIN_SHIFT_M) {
+          changed.push({
+            lat: q.lat,
+            lon: q.lon,
+            orig_lat: p.lat,
+            orig_lon: p.lon,
+            t: p.t,
+            time_cst: fmtCst(p.t),
+            shift_m: Math.round(shift * 10) / 10,
+          });
+        }
       }
     }
     return {
@@ -326,36 +362,36 @@
   }
 
   function showOnMap() {
-    if (!cache.original || !cache.corrected) {
-      setStatus("请先选择并等待原始、纠偏两个 CSV 解析完成。", "err");
+    if (!cache.original && !cache.corrected) {
+      setStatus("请至少选择一个 CSV（原始或纠偏）。", "err");
       return;
     }
-    const day = el.day.value;
-    if (!day) {
-      setStatus("请选择日期。", "err");
+    const dateFrom = el.dateFrom.value;
+    const dateTo = el.dateTo.value;
+    if (!dateFrom || !dateTo) {
+      setStatus("请填写开始日期与结束日期。", "err");
       return;
     }
 
-    const from = el.timeFrom.value;
-    const to = el.timeTo.value;
     let win;
     try {
-      if (from || to) {
-        if (!from || !to) {
-          setStatus("起止时间需同时填写，或都留空以显示整天。", "err");
-          return;
-        }
-        win = windowFromDayAndTimes(day, from, to);
-      } else {
-        win = windowFromDay(day);
-      }
+      win = windowFromParts(
+        dateFrom,
+        el.clockFrom.value,
+        dateTo,
+        el.clockTo.value
+      );
     } catch (e) {
       setStatus(String(e.message || e), "err");
       return;
     }
 
-    const original = filterByTime(cache.original, win.t0, win.t1, win.endExclusive);
-    const corrected = filterByTime(cache.corrected, win.t0, win.t1, win.endExclusive);
+    const original = cache.original
+      ? filterByTime(cache.original, win.t0, win.t1, win.endExclusive)
+      : [];
+    const corrected = cache.corrected
+      ? filterByTime(cache.corrected, win.t0, win.t1, win.endExclusive)
+      : [];
     if (!original.length && !corrected.length) {
       clearLayers();
       setStatus("该时间窗内无点。", "err");
@@ -367,14 +403,17 @@
     drawView(view);
 
     let msg =
-      "原始 " +
+      fmtCst(win.t0) +
+      " → " +
+      fmtCst(win.t1) +
+      "\n原始 " +
       view.nOriginal +
       " 点 · 纠偏 " +
       view.nCorrected +
-      " 点 · 改动 " +
-      view.changed.length +
-      " · 删除 " +
-      view.removed.length;
+      " 点";
+    if (cache.original && cache.corrected) {
+      msg += " · 改动 " + view.changed.length + " · 删除 " + view.removed.length;
+    }
     if (nPts > POINT_WARN_LIMIT) {
       msg +=
         "\n警告：点数 > " +
