@@ -6,25 +6,18 @@
 - **一生足迹 CLI**：`correct_tracks.py`（列含 `dataTime`）
 - **人生点点 / DoL**：`correct_dol.py`（列含 `timestamp`）
 
-## 网页纠偏（GitHub Pages）
+## 网页纠偏
 
-站点：<https://xaoflysho.github.io/gcj-track-correct-/>
+站点：<https://xaoflysho.github.io/gcj-track-correct/>
 
 在页面上选择 CSV，点「开始纠偏」，再点「下载结果」得到 zip（内含 `*_corrected.csv` 与 `*_report.md`）。按表头自动识别：
 
 - **一生足迹**：含 `dataTime`，算法与 `correct_tracks.py` 一致
 - **人生点点 / DoL**：含 `timestamp`，算法与 `correct_dol.py` 一致（车速×时间连续性，可删侧向野点）
 
-可按时间窗在 OpenStreetMap（WGS-84）上对比原始/纠偏轨迹。
+可在 OpenStreetMap（WGS-84）上对比原始/纠偏轨迹：默认显示整份文件，超过 31 天则从开头截取 31 天。点击轨迹或空心删除点，可用底部工具手动改点、删除或恢复。
 
 **文件仅在本机处理，不会上传到任何服务器。**
-
-首次发布需在 GitHub 仓库打开 Pages：
-
-1. Settings → Pages
-2. Source = Deploy from a branch
-3. Branch = `main`，folder = `/docs`
-4. 保存后等待一两分钟，访问上面的地址
 
 本地预览（ES modules 不能用 `file://` 直接打开）：
 
@@ -46,7 +39,6 @@ python scripts/compare_parity.py \
 ## 环境（必须使用虚拟环境）
 
 ```bash
-cd /Users/shaoxiaofei/Developer/Cursor/correct
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -107,7 +99,7 @@ python qa_tracks.py \
 
 ## 地图预览（目视验偏）
 
-纠偏完成后可直接在 GitHub Pages 站点同页预览。也可继续用仓库根目录的 [`track_viewer.html`](track_viewer.html) 对比两份已有 CSV：原始 / 纠偏 **任选其一或都选**；再填起止 **日期**（时分可选；不填时分则整天），跨度不超过 31 天，点「显示」。灰色=原始，蓝色=纠偏；两边都有时显示橙色改动点。底图为 **OpenStreetMap（WGS-84）**。
+纠偏完成后可直接在网页同页预览（默认整份文件，超过 31 天则截取前 31 天）。也可继续用仓库根目录的 [`track_viewer.html`](track_viewer.html) 对比两份已有 CSV：原始 / 纠偏 **任选其一或都选**；再填起止 **日期**（时分可选；不填时分则整天），跨度不超过 31 天，点「显示」。灰色=原始，蓝色=纠偏；橙色为改动点，空心为删除点。底图为 **OpenStreetMap（WGS-84）**。
 
 注意：
 
@@ -126,7 +118,7 @@ python view_tracks.py \
   --out output/preview_20250104.html
 ```
 
-也可用 `--day 2025-01-04`。全年点过多，CLI 与网页都建议按天或更短窗口查看。
+也可用 `--day 2025-01-04`。点数过多时浏览器会变卡，可缩小时间范围。
 
 ## 其它年份
 
