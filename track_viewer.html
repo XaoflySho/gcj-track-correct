@@ -208,11 +208,13 @@
     const lines = text.split(/\r?\n/);
     if (!lines.length) throw new Error("空文件");
     const header = lines[0].split(",");
-    const idxT = header.indexOf("dataTime");
+    const idxT = header.includes("dataTime")
+      ? header.indexOf("dataTime")
+      : header.indexOf("timestamp");
     const idxLon = header.indexOf("longitude");
     const idxLat = header.indexOf("latitude");
     if (idxT < 0 || idxLon < 0 || idxLat < 0) {
-      throw new Error("缺少列 dataTime / longitude / latitude");
+      throw new Error("缺少列 dataTime|timestamp / longitude / latitude");
     }
     const points = [];
     for (let i = 1; i < lines.length; i++) {

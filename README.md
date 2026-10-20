@@ -1,6 +1,42 @@
 # GCJ 轨迹纠偏
 
-检测一生足迹导出 CSV 中驾车轨迹混入的 **GCJ-02（火星坐标）** 点，并用公开库转回 **WGS-84**。日常轨迹与干净驾车段不修改。
+检测轨迹导出 CSV 中驾车段混入的 **GCJ-02（火星坐标）** 点，并用公开库转回 **WGS-84**。日常轨迹与干净驾车段不修改。
+
+- **网页（推荐）**：打开静态站，本地选 CSV → 纠偏 → 下载，文件不离开浏览器
+- **一生足迹 CLI**：`correct_tracks.py`（列含 `dataTime`）
+- **人生点点 / DoL**：`correct_dol.py`（列含 `timestamp`）
+
+## 网页纠偏（GitHub Pages）
+
+站点：<https://xaoflysho.github.io/gcj-track-correct-/>
+
+在页面上选择一生足迹导出的 CSV，点「开始纠偏」，再下载 `*_corrected.csv` 与报告。可按时间窗在 OpenStreetMap（WGS-84）上对比原始/纠偏轨迹。
+
+**文件仅在本机处理，不会上传到任何服务器。** 算法与 `correct_tracks.py` 一致。
+
+首次发布需在 GitHub 仓库打开 Pages：
+
+1. Settings → Pages
+2. Source = Deploy from a branch
+3. Branch = `main`，folder = `/docs`
+4. 保存后等待一两分钟，访问上面的地址
+
+本地预览（ES modules 不能用 `file://` 直接打开）：
+
+```bash
+cd docs
+python3 -m http.server 8000
+```
+
+浏览器打开 <http://127.0.0.1:8000/>。
+
+网页版不做完整 QA 硬门禁；纠偏后仍可用下面的 `qa_tracks.py` 做回归。对比 Python / JS 输出：
+
+```bash
+python scripts/compare_parity.py \
+  --python output/foo_corrected.csv \
+  --js output/foo_js_corrected.csv
+```
 
 ## 环境（必须使用虚拟环境）
 
@@ -32,6 +68,23 @@ python correct_tracks.py \
 
 可选：`--no-dedupe` 保留转换后与邻点几乎重合的点。
 
+## 人生点点 / DoL 导出
+
+DoL CSV 列名为 `timestamp,longitude,latitude,...`（不是 `dataTime`），混点形态也不同，请用专用入口（**不要**对 DoL 跑 `correct_tracks.py`）：
+
+```bash
+python correct_dol.py \
+  --input DoL_261017_7052pt.csv \
+  --output-dir output/
+```
+
+输出：
+
+- `output/<原文件名>_corrected.csv` — 保留全部原列，仅改判定为 GCJ 的经纬度；可删除侧向野点
+- `output/<原文件名>_report.md` — GCJ 块起止、转换/删除点数、残留警告
+
+检测按驾车段的 **车速×时间** 连续性标注 GCJ 块并 `gcj02_to_wgs84`；主体假定为 WGS-84。地图预览（网页或 `view_tracks.py`）已同时支持 `timestamp` 与 `dataTime`。
+
 ## 自动 QA（推荐纠偏后跑）
 
 对比原始与纠偏结果，检查误伤、路径回退，并跑固定回归日；**常驻点（家/公司）从数据自动发现，支持搬家多址**，无需写死家坐标。
@@ -49,7 +102,7 @@ python qa_tracks.py \
 
 ## 地图预览（目视验偏）
 
-**推荐：纯网页，无需起服务器。** 用浏览器打开仓库根目录的 [`track_viewer.html`](track_viewer.html)：原始 / 纠偏 CSV **任选其一或都选**；再填起止 **日期**（时分可选；不填时分则整天），跨度不超过 31 天，点「显示」。灰色=原始，蓝色=纠偏；两边都有时显示橙色改动点。底图为 **OpenStreetMap（WGS-84）**。
+纠偏完成后可直接在 GitHub Pages 站点同页预览。也可继续用仓库根目录的 [`track_viewer.html`](track_viewer.html) 对比两份已有 CSV：原始 / 纠偏 **任选其一或都选**；再填起止 **日期**（时分可选；不填时分则整天），跨度不超过 31 天，点「显示」。灰色=原始，蓝色=纠偏；两边都有时显示橙色改动点。底图为 **OpenStreetMap（WGS-84）**。
 
 注意：
 

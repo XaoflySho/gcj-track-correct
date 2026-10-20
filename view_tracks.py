@@ -29,25 +29,18 @@ from lib.view_map import (
 
 
 def load_csv(path: Path) -> List[TrackPoint]:
-    points: List[TrackPoint] = []
+    """Load 一生足迹 (dataTime) or 人生点点/DoL (timestamp) CSV."""
+    from lib.dol_io import load_dol_csv, time_key
+
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         if not reader.fieldnames:
             raise SystemExit(f"Empty or invalid CSV: {path}")
-        for i, row in enumerate(reader):
-            points.append(
-                TrackPoint(
-                    index=i,
-                    t=int(row["dataTime"]),
-                    lon=float(row["longitude"]),
-                    lat=float(row["latitude"]),
-                    speed=float(row["speed"]),
-                    accuracy=float(row["accuracy"]),
-                    altitude=float(row["altitude"]),
-                    raw=dict(row),
-                )
-            )
-    return points
+        try:
+            time_key(reader.fieldnames)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+    return load_dol_csv(path)
 
 
 def main(argv: List[str] | None = None) -> int:
