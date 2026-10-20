@@ -10,9 +10,14 @@
 
 站点：<https://xaoflysho.github.io/gcj-track-correct-/>
 
-在页面上选择一生足迹导出的 CSV，点「开始纠偏」，再下载 `*_corrected.csv` 与报告。可按时间窗在 OpenStreetMap（WGS-84）上对比原始/纠偏轨迹。
+在页面上选择 CSV，点「开始纠偏」，再点「下载结果」得到 zip（内含 `*_corrected.csv` 与 `*_report.md`）。按表头自动识别：
 
-**文件仅在本机处理，不会上传到任何服务器。** 算法与 `correct_tracks.py` 一致。
+- **一生足迹**：含 `dataTime`，算法与 `correct_tracks.py` 一致
+- **人生点点 / DoL**：含 `timestamp`，算法与 `correct_dol.py` 一致（车速×时间连续性，可删侧向野点）
+
+可按时间窗在 OpenStreetMap（WGS-84）上对比原始/纠偏轨迹。
+
+**文件仅在本机处理，不会上传到任何服务器。**
 
 首次发布需在 GitHub 仓库打开 Pages：
 

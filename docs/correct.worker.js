@@ -12,12 +12,17 @@ self.onmessage = (event) => {
     });
     self.postMessage({
       type: "done",
+      format: result.format,
       inputName: result.inputName,
       totalIn: result.totalIn,
       totalOut: result.totalOut,
       fixedTotal: result.fixedTotal,
       removedTotal: result.removedTotal,
       summaries: result.summaries,
+      dolRuns: result.dolRuns || [],
+      dolWarns: result.dolWarns || [],
+      fieldnames: result.fieldnames,
+      timeKey: result.timeKey,
       report: result.report,
       csvText: result.csvText,
       originalPoints: result.originalPoints,

@@ -1,10 +1,25 @@
 const MIN_SHIFT_M = 5;
 export const POINT_WARN_LIMIT = 8000;
-const MAX_SPAN_S = 31 * 86400;
+export const MAX_SPAN_S = 31 * 86400;
 const CST_OFFSET_MS = 8 * 3600 * 1000;
 
 let map = null;
 let layerGroup = null;
+let selectMarker = null;
+let pickHandler = null;
+let suppressMapPick = false;
+
+function emitPick(latlng, hint) {
+  if (!pickHandler) return;
+  suppressMapPick = true;
+  try {
+    pickHandler(latlng, hint);
+  } finally {
+    setTimeout(() => {
+      suppressMapPick = false;
+    }, 0);
+  }
+}
 
 export function haversineM(lon1, lat1, lon2, lat2) {
   const R = 6371000;
@@ -36,6 +51,13 @@ export function cstDateParts(ts) {
   return `${y}-${m}-${day}`;
 }
 
+export function cstClockParts(ts) {
+  const d = new Date(ts * 1000 + CST_OFFSET_MS);
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 function parseCstDateTime(dayStr, clockStr, endOfDay) {
   const dm = dayStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!dm) throw new Error("日期格式无效");
@@ -64,7 +86,7 @@ export function windowFromParts(dateFrom, clockFrom, dateTo, clockTo) {
   const t0 = parseCstDateTime(dateFrom, clockFrom || "", false);
   const t1 = parseCstDateTime(dateTo, clockTo || "", true);
   if (t1 < t0) throw new Error("结束时间不能早于开始时间");
-  if (t1 - t0 > MAX_SPAN_S) {
+  if (t1 - t0 > MAX_SPAN_S + 59) {
     throw new Error("时间跨度不能超过 31 天，请缩小范围");
   }
   return { t0, t1, endExclusive: false };
@@ -78,27 +100,25 @@ export function filterByTime(points, t0, t1, endExclusive) {
 export function alignTracks(original, corrected) {
   const changed = [];
   const removed = [];
-  if (original.length && corrected.length) {
-    const byT = new Map();
-    for (const p of corrected) byT.set(p.t, p);
-    for (const p of original) {
-      const q = byT.get(p.t);
-      if (!q) {
-        removed.push({ lat: p.lat, lon: p.lon, t: p.t, time_cst: fmtCst(p.t) });
-        continue;
-      }
-      const shift = haversineM(p.lon, p.lat, q.lon, q.lat);
-      if (shift >= MIN_SHIFT_M) {
-        changed.push({
-          lat: q.lat,
-          lon: q.lon,
-          orig_lat: p.lat,
-          orig_lon: p.lon,
-          t: p.t,
-          time_cst: fmtCst(p.t),
-          shift_m: Math.round(shift * 10) / 10,
-        });
-      }
+  const byT = new Map();
+  for (const p of corrected) byT.set(p.t, p);
+  for (const p of original) {
+    const q = byT.get(p.t);
+    if (!q) {
+      removed.push({ lat: p.lat, lon: p.lon, t: p.t, time_cst: fmtCst(p.t) });
+      continue;
+    }
+    const shift = haversineM(p.lon, p.lat, q.lon, q.lat);
+    if (shift >= MIN_SHIFT_M) {
+      changed.push({
+        lat: q.lat,
+        lon: q.lon,
+        orig_lat: p.lat,
+        orig_lon: p.lon,
+        t: p.t,
+        time_cst: fmtCst(p.t),
+        shift_m: Math.round(shift * 10) / 10,
+      });
     }
   }
   return {
@@ -122,70 +142,143 @@ export function initMap(targetId = "map") {
     attribution: "&copy; OpenStreetMap",
   }).addTo(map);
   layerGroup = L.layerGroup().addTo(map);
+  map.getContainer()._leafletMap = map;
+  map.on("click", (e) => {
+    if (suppressMapPick) return;
+    if (pickHandler) pickHandler(e.latlng);
+  });
   return map;
+}
+
+export function getMap() {
+  return map;
+}
+
+export function setPickHandler(fn) {
+  pickHandler = fn;
+}
+
+export function pickRadiusM() {
+  if (!map) return 80;
+  const center = map.getCenter();
+  const p = map.latLngToContainerPoint(center);
+  const ll = map.containerPointToLatLng(L.point(p.x + 36, p.y));
+  return Math.max(30, map.distance(center, ll));
+}
+
+export function nearestPoint(latlng, points, maxM) {
+  if (!points || !points.length) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const p of points) {
+    const d = haversineM(latlng.lng, latlng.lat, p.lon, p.lat);
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  if (!best || bestD > maxM) return null;
+  return { point: best, distM: bestD };
+}
+
+export function setSelectMarker(lat, lon, onDragEnd, draggable = true) {
+  if (!map) return;
+  if (selectMarker) {
+    selectMarker.remove();
+    selectMarker = null;
+  }
+  selectMarker = L.marker([lat, lon], {
+    draggable,
+    zIndexOffset: 1200,
+    title: draggable ? "拖动以手动修正" : "已删除，可恢复到输出",
+  }).addTo(map);
+  if (draggable && onDragEnd) {
+    selectMarker.on("dragend", () => {
+      const ll = selectMarker.getLatLng();
+      onDragEnd(ll.lng, ll.lat);
+    });
+  }
+}
+
+export function moveSelectMarker(lat, lon) {
+  if (selectMarker) selectMarker.setLatLng([lat, lon]);
+}
+
+export function clearSelectMarker() {
+  if (selectMarker) {
+    selectMarker.remove();
+    selectMarker = null;
+  }
 }
 
 export function clearLayers() {
   if (layerGroup) layerGroup.clearLayers();
 }
 
-export function drawView(view) {
+export function drawView(view, options = {}) {
+  const fit = options.fit !== false;
   clearLayers();
   const bounds = [];
 
   if (view.originalLatLngs.length) {
-    L.polyline(view.originalLatLngs, {
+    const line = L.polyline(view.originalLatLngs, {
       color: "#888",
       weight: 4,
       opacity: 0.55,
+      bubblingMouseEvents: false,
     }).addTo(layerGroup);
+    line.on("click", (e) => {
+      L.DomEvent.stop(e);
+      emitPick(e.latlng);
+    });
     view.originalLatLngs.forEach((ll) => bounds.push(ll));
   }
   if (view.correctedLatLngs.length) {
-    L.polyline(view.correctedLatLngs, {
+    const line = L.polyline(view.correctedLatLngs, {
       color: "#1a73e8",
       weight: 4,
       opacity: 0.9,
+      bubblingMouseEvents: false,
     }).addTo(layerGroup);
+    line.on("click", (e) => {
+      L.DomEvent.stop(e);
+      emitPick(e.latlng);
+    });
     view.correctedLatLngs.forEach((ll) => bounds.push(ll));
   }
   for (const p of view.changed) {
     const m = L.circleMarker([p.lat, p.lon], {
-      radius: 5,
+      radius: 6,
       color: "#c06000",
       fillColor: "#f09000",
       fillOpacity: 0.9,
       weight: 1,
+      bubblingMouseEvents: false,
     }).addTo(layerGroup);
-    m.bindPopup(
-      "<b>改动点</b><br/>" +
-        p.time_cst +
-        "<br/>位移 " +
-        p.shift_m +
-        " m<br/>原 " +
-        p.orig_lat.toFixed(6) +
-        ", " +
-        p.orig_lon.toFixed(6) +
-        "<br/>新 " +
-        p.lat.toFixed(6) +
-        ", " +
-        p.lon.toFixed(6)
-    );
+    m.on("click", (e) => {
+      L.DomEvent.stop(e);
+      emitPick({ lat: p.lat, lng: p.lon }, { kind: "out", t: p.t });
+    });
     bounds.push([p.lat, p.lon]);
   }
   for (const p of view.removed) {
     const m = L.circleMarker([p.lat, p.lon], {
-      radius: 4,
-      color: "#666",
-      fillColor: "transparent",
-      fillOpacity: 0,
+      radius: 8,
+      color: "#444",
+      fillColor: "#ffffff",
+      fillOpacity: 0.45,
       weight: 2,
+      fill: true,
+      bubblingMouseEvents: false,
     }).addTo(layerGroup);
-    m.bindPopup("<b>删除点</b><br/>" + p.time_cst);
+    m.on("click", (e) => {
+      L.DomEvent.stop(e);
+      emitPick({ lat: p.lat, lng: p.lon }, { kind: "removed", t: p.t });
+    });
     bounds.push([p.lat, p.lon]);
   }
 
-  if (bounds.length) {
+  if (fit && bounds.length) {
     map.fitBounds(bounds, { padding: [40, 40] });
   }
 }

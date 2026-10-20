@@ -8,6 +8,7 @@ import {
   pathStats,
   segmentIndices,
 } from "./detect.js";
+import { processDolTrack, summarizeRuns } from "./detect_dol.js";
 
 function format1(n) {
   return n.toFixed(1);
@@ -161,11 +162,101 @@ export function processPoints(points, dedupe = true, onProgress) {
   return { outRows, summaries, fixedTotal, removedTotal };
 }
 
+export function buildDolReport(
+  inputName,
+  totalIn,
+  totalOut,
+  fixed,
+  removed,
+  runLines,
+  warnLines
+) {
+  const lines = [
+    "# 人生点点（DoL）轨迹纠偏报告",
+    "",
+    `- 输入文件：\`${inputName}\``,
+    `- 输入点数：**${totalIn}**`,
+    `- 输出点数：**${totalOut}**`,
+    `- GCJ→WGS 转换点数：**${fixed}**`,
+    `- 侧向野点删除：**${removed.length}**`,
+    "",
+    "## GCJ 块（已转换）",
+    "",
+  ];
+  if (!runLines.length) lines.push("_未检测到 GCJ 污染。_");
+  else for (const line of runLines) lines.push(`- ${line}`);
+
+  lines.push("", "## 删除的野点", "");
+  if (!removed.length) lines.push("_无。_");
+  else {
+    for (const idx of removed) {
+      lines.push(`- 原始行号约 ${idx + 2}（0-based index ${idx}）`);
+    }
+  }
+
+  lines.push("", "## 残留警告跳变", "");
+  if (!warnLines.length) lines.push("_无。_");
+  else for (const line of warnLines) lines.push(`- ${line}`);
+
+  lines.push("");
+  return lines.join("\n");
+}
+
 export function processCsvText(text, options = {}) {
   const dedupe = options.dedupe !== false;
   const inputName = options.inputName || "input.csv";
   const onProgress = options.onProgress;
-  const points = parseCsv(text);
+  const { points, fieldnames, format, timeKey } = parseCsv(text);
+
+  if (format === "dol") {
+    const { corrected, fixed, removed, runs, warns } = processDolTrack(
+      points,
+      onProgress
+    );
+    const outRows = corrected.map((p) => p.raw);
+    const runLines = summarizeRuns(runs);
+    const warnLines = warns.map(
+      (w) =>
+        `${fmtCst(w.t)}  步进 ${format0(w.jump_m)} m（期望约 ${format0(w.expect_m)} m）— ${w.note}`
+    );
+    const summaries = runs.map((r) => ({
+      t0: fmtCst(r.t0),
+      t1: fmtCst(r.t1),
+      n_in: r.n,
+      n_out: r.n,
+      fixed: r.n,
+      removed: 0,
+      switches: 0,
+      max_spd: 0,
+      is_drive: true,
+    }));
+    return {
+      format: "dol",
+      inputName,
+      totalIn: points.length,
+      totalOut: outRows.length,
+      fixedTotal: fixed,
+      removedTotal: removed.length,
+      summaries,
+      dolRuns: runLines,
+      dolWarns: warnLines,
+      report: buildDolReport(
+        inputName,
+        points.length,
+        outRows.length,
+        fixed,
+        removed,
+        runLines,
+        warnLines
+      ),
+      fieldnames,
+      timeKey,
+      csvText: stringifyCsv(outRows, fieldnames),
+      originalPoints: mapPointsFromTrack(points),
+      correctedPoints: mapPointsFromRows(outRows, timeKey),
+    };
+  }
+
   const { outRows, summaries, fixedTotal, removedTotal } = processPoints(
     points,
     dedupe,
@@ -180,15 +271,20 @@ export function processCsvText(text, options = {}) {
     summaries
   );
   return {
+    format: "footprint",
     inputName,
     totalIn: points.length,
     totalOut: outRows.length,
     fixedTotal,
     removedTotal,
     summaries,
+    dolRuns: [],
+    dolWarns: [],
+    fieldnames,
+    timeKey,
     report,
     csvText: stringifyCsv(outRows),
     originalPoints: mapPointsFromTrack(points),
-    correctedPoints: mapPointsFromRows(outRows),
+    correctedPoints: mapPointsFromRows(outRows, timeKey),
   };
 }

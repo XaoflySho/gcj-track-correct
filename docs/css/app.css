@@ -57,7 +57,8 @@ html, body {
 
 .row input[type="file"],
 .row input[type="date"],
-.row input[type="time"] {
+.row input[type="time"],
+.row input[type="text"] {
   width: 100%;
   box-sizing: border-box;
 }
@@ -113,6 +114,11 @@ button.primary {
 button.secondary {
   background: #eef3fb;
   color: #1a73e8;
+}
+
+button.danger {
+  background: #fdecea;
+  color: #b00020;
 }
 
 button:disabled {
@@ -211,4 +217,77 @@ td.num, th.num { text-align: right; }
   font-size: 11px;
 }
 
-.hidden { display: none; }
+.hidden { display: none !important; }
+
+.pick-bar {
+  position: absolute;
+  z-index: 1100;
+  left: 12px;
+  right: 12px;
+  bottom: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 8px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+  padding: 10px 12px;
+  color: #222;
+  font-size: 13px;
+}
+
+@media (min-width: 860px) {
+  .pick-bar {
+    left: 428px;
+  }
+}
+
+.pick-idle {
+  font-size: 12px;
+  color: #555;
+}
+
+.pick-active {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-end;
+}
+
+.pick-nav,
+.pick-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.pick-info {
+  flex: 1 1 180px;
+  min-width: 160px;
+  font-size: 12px;
+  color: #444;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
+.pick-coords {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pick-coords label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: #555;
+}
+
+.pick-coords input {
+  width: 132px;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 5px 7px;
+  border: 1px solid #d0d5dd;
+  border-radius: 4px;
+}

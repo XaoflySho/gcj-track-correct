@@ -16,23 +16,23 @@
       <p class="privacy">文件仅在本机处理，不会上传。</p>
 
       <div class="row">
-        <label for="fileInput">一生足迹 CSV</label>
+        <label for="fileInput">轨迹 CSV</label>
         <input type="file" id="fileInput" accept=".csv,text/csv" />
         <div class="file-name" id="fileName">未选择</div>
+        <div class="hint">一生足迹（dataTime）或人生点点 / DoL（timestamp），按表头自动识别</div>
       </div>
 
-      <label class="check">
+      <label class="check" id="dedupeRow">
         <input type="checkbox" id="noDedupe" />
-        不去重（保留转换后几乎重合的点）
+        不去重（一生足迹：保留转换后几乎重合的点）
       </label>
 
       <div class="actions">
         <button type="button" class="primary" id="btnCorrect" disabled>开始纠偏</button>
-        <button type="button" class="secondary" id="btnCsv" disabled>下载纠偏 CSV</button>
-        <button type="button" class="secondary" id="btnReport" disabled>下载报告</button>
+        <button type="button" class="secondary" id="btnDownload" disabled>下载结果</button>
       </div>
 
-      <div id="status">请选择一生足迹导出的 CSV，然后点击「开始纠偏」。</div>
+      <div id="status">请选择一生足迹或人生点点导出的 CSV，然后点击「开始纠偏」。</div>
     </div>
     <div class="panel-body">
     <div id="stats" class="stats hidden"></div>
@@ -66,7 +66,7 @@
             <input type="time" id="clockTo" step="60" />
           </div>
         </div>
-        <div class="hint">不填时分则到当天 23:59；跨度 ≤ 31 天</div>
+        <div class="hint">默认整份文件；超过 31 天则从开头截取 31 天。不填时分则到当天 23:59</div>
       </div>
       <div class="actions">
         <button type="button" class="primary" id="btnShow">显示</button>
@@ -76,12 +76,37 @@
         <div class="legend-row"><span class="swatch" style="background:#1a73e8"></span>纠偏轨迹</div>
         <div class="legend-row"><span class="dot" style="background:#f09000"></span>改动点（≥5 m）</div>
         <div class="legend-row"><span class="dot hollow"></span>删除点（近重复去除）</div>
-        <p class="note">底图 OpenStreetMap（WGS-84）。请勿用高德/腾讯底图直接贴 WGS 点。</p>
+        <p class="note">底图 OpenStreetMap（WGS-84）。点击蓝色轨迹或空心删除点，用底部工具改点、删除或恢复。请勿用高德/腾讯底图直接贴 WGS 点。</p>
       </div>
     </div>
     </div>
   </div>
   <div id="map"></div>
+  <div id="pickBar" class="pick-bar hidden">
+    <div id="pickIdle" class="pick-idle">点击蓝色轨迹或空心删除点以选中，随后可转换、改坐标、拖动、删除或恢复。</div>
+    <div id="pickActive" class="pick-active hidden">
+      <div class="pick-nav">
+        <button type="button" class="secondary" id="btnPrevPick">上一点</button>
+        <button type="button" class="secondary" id="btnNextPick">下一点</button>
+      </div>
+      <div class="pick-info" id="pickMeta"></div>
+      <div class="pick-coords">
+        <label for="pickLon">经度
+          <input id="pickLon" type="text" inputmode="decimal" autocomplete="off" />
+        </label>
+        <label for="pickLat">纬度
+          <input id="pickLat" type="text" inputmode="decimal" autocomplete="off" />
+        </label>
+      </div>
+      <div class="pick-actions">
+        <button type="button" class="primary" id="btnGcj2Wgs">此点 GCJ→WGS</button>
+        <button type="button" class="secondary" id="btnApplyPick">应用坐标</button>
+        <button type="button" class="secondary" id="btnRestorePick">恢复原始</button>
+        <button type="button" class="danger" id="btnDeletePick">删除此点</button>
+        <button type="button" class="secondary" id="btnClosePick">关闭</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
