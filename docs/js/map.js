@@ -263,10 +263,10 @@ export function drawView(view, options = {}) {
   }
   for (const p of view.removed) {
     const m = L.circleMarker([p.lat, p.lon], {
-      radius: 8,
-      color: "#444",
+      radius: 5,
+      color: "#666",
       fillColor: "#ffffff",
-      fillOpacity: 0.45,
+      fillOpacity: 0.35,
       weight: 2,
       fill: true,
       bubblingMouseEvents: false,
