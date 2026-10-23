@@ -102,30 +102,37 @@ function escapeHtml(s) {
 
 function renderStats(result) {
   el.stats.classList.remove("hidden");
-  const removedLabel = result.format === "dol" ? "侧向野点删除" : "近重复删除";
   const kind = result.format === "dol" ? "人生点点 / DoL" : "一生足迹";
   el.stats.innerHTML =
     `<p>格式 <b>${kind}</b> · 输入 <b>${result.totalIn.toLocaleString()}</b> 点 · 输出 <b>${result.totalOut.toLocaleString()}</b> 点</p>` +
-    `<p>GCJ→WGS 转换 <b>${result.fixedTotal}</b> · ${removedLabel} <b>${result.removedTotal}</b></p>`;
+    `<p>GCJ→WGS 转换 <b>${result.fixedTotal}</b> · 删除 <b>${result.removedTotal}</b></p>`;
 }
 
-function renderDolExtras(result) {
-  let html = `<div class="section-title">GCJ 块（已转换）</div>`;
-  if (!result.dolRuns.length) {
-    html += `<p class="hint">未检测到 GCJ 污染。</p>`;
-  } else {
+function renderOptionalExtras(result) {
+  const runs = result.dolRuns || [];
+  const warns = result.dolWarns || [];
+  const removed = result.removedIndices || [];
+  let html = "";
+  if (runs.length) {
+    html += `<div class="section-title">GCJ 块（已转换）</div>`;
     html += `<ul class="hint" style="padding-left:18px">`;
-    for (const line of result.dolRuns) {
+    for (const line of runs) {
       html += `<li>${escapeHtml(line)}</li>`;
     }
     html += `</ul>`;
   }
-  html += `<div class="section-title">残留警告跳变</div>`;
-  if (!result.dolWarns.length) {
-    html += `<p class="hint">无。</p>`;
-  } else {
+  if (removed.length) {
+    html += `<div class="section-title">删除的点</div>`;
     html += `<ul class="hint" style="padding-left:18px">`;
-    for (const line of result.dolWarns) {
+    for (const idx of removed) {
+      html += `<li>原始行号约 ${idx + 2}（0-based index ${idx}）</li>`;
+    }
+    html += `</ul>`;
+  }
+  if (warns.length) {
+    html += `<div class="section-title">残留警告跳变</div>`;
+    html += `<ul class="hint" style="padding-left:18px">`;
+    for (const line of warns) {
       html += `<li>${escapeHtml(line)}</li>`;
     }
     html += `</ul>`;
@@ -180,9 +187,7 @@ function renderTables(result) {
     }
     html += `</tbody></table></div>`;
   }
-  if (result.format === "dol") {
-    html += renderDolExtras(result);
-  }
+  html += renderOptionalExtras(result);
   el.tables.innerHTML = html;
 }
 
@@ -725,9 +730,8 @@ el.btnCorrect.addEventListener("click", async () => {
     renderTables(state.result);
     el.previewBlock.classList.remove("hidden");
     fillDateRange(msg);
-    const removedLabel = msg.format === "dol" ? "侧向野点" : "近重复";
     setStatus(
-      `完成。转换 ${msg.fixedTotal} 点，删除${removedLabel} ${msg.removedTotal} 点。可下载结果，或改时间后点「显示」。`
+      `完成。转换 ${msg.fixedTotal} 点，删除 ${msg.removedTotal} 点。可下载结果，或改时间后点「显示」。`
     );
     el.btnShow.click();
   };

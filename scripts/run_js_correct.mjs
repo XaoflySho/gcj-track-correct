@@ -37,6 +37,5 @@ writeFileSync(csvPath, result.csvText, "utf8");
 writeFileSync(reportPath, result.report, "utf8");
 console.log(`Wrote ${csvPath} (${result.totalOut} points)`);
 console.log(`Wrote ${reportPath}`);
-const removedLabel = result.format === "dol" ? "lateral spikes" : "near-duplicates";
 console.log(`Format: ${result.format}`);
-console.log(`Converted: ${result.fixedTotal}, removed ${removedLabel}: ${result.removedTotal}`);
+console.log(`Converted: ${result.fixedTotal}, removed: ${result.removedTotal}`);

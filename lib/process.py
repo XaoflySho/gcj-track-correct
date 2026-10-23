@@ -16,6 +16,7 @@ from .detect import (
 )
 from .detect import _gcj_runs
 from .qa_anchors import discover_stay_anchors, near_any_anchor
+from .report import gcj_run_lines
 
 
 @dataclass
@@ -122,14 +123,29 @@ def apply_corrections(
     return corrected_all, summaries, fixed_total, removed_all
 
 
+def global_labels(n: int, segs: Sequence[LabeledSegment]) -> List[str]:
+    labels = ["U"] * n
+    for seg in segs:
+        for local, gi in enumerate(seg.idxs):
+            labels[gi] = seg.labels[local]
+    return labels
+
+
 def process_track(
     points: List[TrackPoint],
     *,
     dedupe: bool = True,
     drop_indices: Optional[Sequence[int]] = None,
-) -> Tuple[List[dict], List[dict], int, int]:
+) -> Tuple[List[dict], List[dict], int, List[int], List[str]]:
     segs = label_segments(points)
+    labels = global_labels(len(points), segs)
     corrected, summaries, fixed_total, removed = apply_corrections(
         segs, dedupe=dedupe, drop_indices=drop_indices
     )
-    return [p.raw for p in corrected], summaries, fixed_total, len(removed)
+    return (
+        [p.raw for p in corrected],
+        summaries,
+        fixed_total,
+        removed,
+        gcj_run_lines(points, labels),
+    )

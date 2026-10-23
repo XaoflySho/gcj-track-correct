@@ -21,6 +21,7 @@ self.onmessage = (event) => {
       summaries: result.summaries,
       dolRuns: result.dolRuns || [],
       dolWarns: result.dolWarns || [],
+      removedIndices: result.removedIndices || [],
       fieldnames: result.fieldnames,
       timeKey: result.timeKey,
       report: result.report,

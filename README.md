@@ -63,7 +63,7 @@ python correct_tracks.py \
 输出：
 
 - `output/<原文件名>_corrected.csv` — 纠偏后的轨迹（不覆盖原文件）
-- `output/<原文件名>_report.md` — 修改摘要
+- `output/<原文件名>_report.md` — 纠偏报告（行程表；有转换块、删除点或残留警告时再追加）
 
 可选：`--no-dedupe` 保留转换后与邻点几乎重合的点。
 
@@ -80,7 +80,7 @@ python correct_dol.py \
 输出：
 
 - `output/<原文件名>_corrected.csv` — 保留全部原列，仅改判定为 GCJ 的经纬度；可删除侧向野点
-- `output/<原文件名>_report.md` — 行程摘要、GCJ 块起止、转换/删除点数、残留警告
+- `output/<原文件名>_report.md` — 与一生足迹同一份结构；有转换块、删除点或残留警告时再追加对应节
 
 `qa_tracks.py` 与地图预览（网页或 `view_tracks.py`）同时支持 `timestamp` 与 `dataTime`。
 

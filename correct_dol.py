@@ -19,6 +19,7 @@ from typing import List, Sequence
 from lib.detect import fmt_cst
 from lib.detect_dol import process_dol_track, summarize_runs
 from lib.dol_io import load_dol_csv, write_dol_csv
+from lib.report import build_report
 
 
 def read_fieldnames(path: Path) -> List[str]:
@@ -27,69 +28,6 @@ def read_fieldnames(path: Path) -> List[str]:
         if not reader.fieldnames:
             raise SystemExit(f"Empty or invalid CSV: {path}")
         return list(reader.fieldnames)
-
-
-def build_report(
-    input_name: str,
-    total_in: int,
-    total_out: int,
-    fixed: int,
-    removed: Sequence[int],
-    run_lines: Sequence[str],
-    warn_lines: Sequence[str],
-    seg_summaries: Sequence[dict],
-) -> str:
-    lines = [
-        "# 人生点点（DoL）轨迹纠偏报告",
-        "",
-        f"- 输入文件：`{input_name}`",
-        f"- 输入点数：**{total_in}**",
-        f"- 输出点数：**{total_out}**",
-        f"- GCJ→WGS 转换点数：**{fixed}**",
-        f"- 侧向野点删除：**{len(removed)}**",
-        "",
-        "## 发生纠偏的行程",
-        "",
-    ]
-    corrected_segs = [s for s in seg_summaries if s["fixed"] > 0 or s["removed"] > 0]
-    if not corrected_segs:
-        lines.append("_未检测到 GCJ 污染。_")
-    else:
-        lines.append(
-            "| 开始（CST） | 结束 | 输入点数 | 输出点数 | 转换 | 删除 | "
-            "切换次数 | 最高速 m/s | 最大步进 修前→修后 |"
-        )
-        lines.append("|---|---|---:|---:|---:|---:|---:|---:|---|")
-        for s in sorted(corrected_segs, key=lambda x: -x["fixed"]):
-            lines.append(
-                f"| {s['t0']} | {s['t1']} | {s['n_in']} | {s['n_out']} | "
-                f"{s['fixed']} | {s['removed']} | {s['switches']} | "
-                f"{s['max_spd']:.1f} | {s['max_before']:.0f}→{s['max_after']:.0f} m |"
-            )
-
-    lines.extend(["", "## GCJ 块（已转换）", ""])
-    if not run_lines:
-        lines.append("_未检测到 GCJ 污染。_")
-    else:
-        for line in run_lines:
-            lines.append(f"- {line}")
-
-    lines.extend(["", "## 删除的野点", ""])
-    if not removed:
-        lines.append("_无。_")
-    else:
-        for idx in removed:
-            lines.append(f"- 原始行号约 {idx + 2}（0-based index {idx}）")
-
-    lines.extend(["", "## 残留警告跳变", ""])
-    if not warn_lines:
-        lines.append("_无。_")
-    else:
-        for line in warn_lines:
-            lines.append(f"- {line}")
-
-    lines.append("")
-    return "\n".join(lines)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -147,17 +85,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         len(points),
         len(corrected),
         fixed,
-        removed,
-        run_lines,
-        warn_lines,
+        len(removed),
         summaries,
+        run_lines=run_lines,
+        removed_indices=removed,
+        warn_lines=warn_lines,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report, encoding="utf-8")
 
     print(f"Wrote {csv_path} ({len(corrected)} points)")
     print(f"Wrote {report_path}")
-    print(f"Converted: {fixed}, removed lateral spikes: {len(removed)}")
+    print(f"Converted: {fixed}, removed: {len(removed)}")
     if runs:
         print(f"GCJ runs: {len(runs)}")
     if warns:

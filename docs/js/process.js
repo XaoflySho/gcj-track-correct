@@ -30,8 +30,12 @@ export function buildReport(
   totalOut,
   fixedTotal,
   removedTotal,
-  segSummaries
+  segSummaries,
+  extras = {}
 ) {
+  const runLines = extras.runLines || [];
+  const removedIndices = extras.removedIndices || [];
+  const warnLines = extras.warnLines || [];
   const lines = [
     "# 轨迹纠偏报告",
     "",
@@ -39,7 +43,7 @@ export function buildReport(
     `- 输入点数：**${totalIn}**`,
     `- 输出点数：**${totalOut}**`,
     `- GCJ→WGS 转换点数：**${fixedTotal}**`,
-    `- 近重复删除点数：**${removedTotal}**`,
+    `- 删除点数：**${removedTotal}**`,
     "",
     "## 发生纠偏的行程",
     "",
@@ -84,6 +88,21 @@ export function buildReport(
           `${format1(s.max_spd)} | ${kind} |`
       );
     }
+  }
+
+  if (runLines.length) {
+    lines.push("", "## GCJ 块（已转换）", "");
+    for (const line of runLines) lines.push(`- ${line}`);
+  }
+  if (removedIndices.length) {
+    lines.push("", "## 删除的点", "");
+    for (const idx of removedIndices) {
+      lines.push(`- 原始行号约 ${idx + 2}（0-based index ${idx}）`);
+    }
+  }
+  if (warnLines.length) {
+    lines.push("", "## 残留警告跳变", "");
+    for (const line of warnLines) lines.push(`- ${line}`);
   }
 
   lines.push("");
@@ -198,75 +217,23 @@ export function applyCorrections(segs, dedupe = true, dropIndices) {
 
 export function processPoints(points, dedupe = true, onProgress) {
   const segs = labelSegments(points, onProgress);
+  const globalLabels = Array(points.length).fill("U");
+  for (const seg of segs) {
+    for (let i = 0; i < seg.idxs.length; i++) {
+      globalLabels[seg.idxs[i]] = seg.labels[i];
+    }
+  }
   const { outRows, summaries, fixedTotal, removed } = applyCorrections(
     segs,
     dedupe
   );
-  return { outRows, summaries, fixedTotal, removedTotal: removed.length };
-}
-
-export function buildDolReport(
-  inputName,
-  totalIn,
-  totalOut,
-  fixed,
-  removed,
-  runLines,
-  warnLines,
-  segSummaries
-) {
-  const lines = [
-    "# 人生点点（DoL）轨迹纠偏报告",
-    "",
-    `- 输入文件：\`${inputName}\``,
-    `- 输入点数：**${totalIn}**`,
-    `- 输出点数：**${totalOut}**`,
-    `- GCJ→WGS 转换点数：**${fixed}**`,
-    `- 侧向野点删除：**${removed.length}**`,
-    "",
-    "## 发生纠偏的行程",
-    "",
-  ];
-
-  const correctedSegs = (segSummaries || []).filter(
-    (s) => s.fixed > 0 || s.removed > 0
-  );
-  if (!correctedSegs.length) {
-    lines.push("_未检测到 GCJ 污染。_");
-  } else {
-    lines.push(
-      "| 开始（CST） | 结束 | 输入点数 | 输出点数 | 转换 | 删除 | " +
-        "切换次数 | 最高速 m/s | 最大步进 修前→修后 |"
-    );
-    lines.push("|---|---|---:|---:|---:|---:|---:|---:|---|");
-    const sorted = correctedSegs.slice().sort((a, b) => b.fixed - a.fixed);
-    for (const s of sorted) {
-      lines.push(
-        `| ${s.t0} | ${s.t1} | ${s.n_in} | ${s.n_out} | ` +
-          `${s.fixed} | ${s.removed} | ${s.switches} | ` +
-          `${format1(s.max_spd)} | ${format0(s.max_before)}→${format0(s.max_after)} m |`
-      );
-    }
-  }
-
-  lines.push("", "## GCJ 块（已转换）", "");
-  if (!runLines.length) lines.push("_未检测到 GCJ 污染。_");
-  else for (const line of runLines) lines.push(`- ${line}`);
-
-  lines.push("", "## 删除的野点", "");
-  if (!removed.length) lines.push("_无。_");
-  else {
-    for (const idx of removed) {
-      lines.push(`- 原始行号约 ${idx + 2}（0-based index ${idx}）`);
-    }
-  }
-
-  lines.push("", "## 残留警告跳变", "");
-  if (!warnLines.length) lines.push("_无。_");
-  else for (const line of warnLines) lines.push(`- ${line}`);
-
-  lines.push("");
-  return lines.join("\n");
+  return {
+    outRows,
+    summaries,
+    fixedTotal,
+    removed,
+    runLines: summarizeRuns(gcjRunsFromLabels(points, globalLabels)),
+  };
 }
 
 export function processCsvText(text, options = {}) {
@@ -309,15 +276,15 @@ export function processCsvText(text, options = {}) {
       summaries,
       dolRuns: runLines,
       dolWarns: warnLines,
-      report: buildDolReport(
+      removedIndices: removed,
+      report: buildReport(
         inputName,
         points.length,
         outRows.length,
         fixedTotal,
-        removed,
-        runLines,
-        warnLines,
-        summaries
+        removed.length,
+        summaries,
+        { runLines, removedIndices: removed, warnLines }
       ),
       fieldnames,
       timeKey,
@@ -327,7 +294,7 @@ export function processCsvText(text, options = {}) {
     };
   }
 
-  const { outRows, summaries, fixedTotal, removedTotal } = processPoints(
+  const { outRows, summaries, fixedTotal, removed, runLines } = processPoints(
     points,
     dedupe,
     onProgress
@@ -337,8 +304,9 @@ export function processCsvText(text, options = {}) {
     points.length,
     outRows.length,
     fixedTotal,
-    removedTotal,
-    summaries
+    removed.length,
+    summaries,
+    { runLines, removedIndices: removed }
   );
   return {
     format: "footprint",
@@ -346,10 +314,11 @@ export function processCsvText(text, options = {}) {
     totalIn: points.length,
     totalOut: outRows.length,
     fixedTotal,
-    removedTotal,
+    removedTotal: removed.length,
     summaries,
-    dolRuns: [],
+    dolRuns: runLines,
     dolWarns: [],
+    removedIndices: removed,
     fieldnames,
     timeKey,
     report,
