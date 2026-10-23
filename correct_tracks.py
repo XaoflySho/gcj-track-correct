@@ -18,17 +18,8 @@ import sys
 from pathlib import Path
 from typing import List, Sequence, Tuple
 
-from lib.detect import (
-    TrackPoint,
-    analyze_segment,
-    correct_points,
-    fmt_cst,
-    haversine_m,
-    path_stats,
-    segment_indices,
-)
-from lib.detect import _gcj_runs
-from lib.qa_anchors import discover_stay_anchors, near_any_anchor
+from lib.detect import TrackPoint
+from lib.process import process_track
 
 
 FIELDNAMES = [
@@ -153,72 +144,7 @@ def process(
     *,
     dedupe: bool = True,
 ) -> Tuple[List[dict], List[dict], int, int]:
-    times = [p.t for p in points]
-    segs_idx = segment_indices(times)
-    # Never convert points near auto-discovered stay anchors (homes / offices).
-    anchors = discover_stay_anchors(points)
-
-    out_rows: List[dict] = []
-    summaries: List[dict] = []
-    fixed_total = 0
-    removed_total = 0
-
-    for idxs in segs_idx:
-        seg_points = [points[i] for i in idxs]
-        result = analyze_segment(seg_points)
-
-        before_coords = [(p.lon, p.lat) for p in seg_points]
-        _, _, max_before = path_stats(before_coords)
-
-        labels = list(result.labels)
-        if anchors and result.gcj_count > 0:
-            # Drop whole GCJ runs that touch a stay anchor — never punch holes
-            # in a block (partial convert makes paths worse, e.g. 2025-02-05).
-            for start, end in _gcj_runs(labels):
-                if any(
-                    near_any_anchor(seg_points[i].lon, seg_points[i].lat, anchors)
-                    for i in range(start, end)
-                ):
-                    for i in range(start, end):
-                        labels[i] = "W"
-            if not any(lab == "G" for lab in labels):
-                labels = ["U"] * len(labels)
-
-        gcj_count = sum(1 for lab in labels if lab == "G")
-        if result.is_drive and gcj_count > 0:
-            corrected, fixed, removed = correct_points(
-                seg_points, labels, dedupe=dedupe
-            )
-        else:
-            corrected = seg_points
-            fixed = 0
-            removed = []
-
-        after_coords = [(p.lon, p.lat) for p in corrected]
-        _, _, max_after = path_stats(after_coords)
-
-        fixed_total += fixed
-        removed_total += len(removed)
-        for p in corrected:
-            out_rows.append(p.raw)
-
-        summaries.append(
-            {
-                "t0": fmt_cst(result.t0),
-                "t1": fmt_cst(result.t1),
-                "n_in": len(seg_points),
-                "n_out": len(corrected),
-                "fixed": fixed,
-                "removed": len(removed),
-                "switches": len(result.switches),
-                "max_spd": result.max_speed,
-                "max_before": max_before,
-                "max_after": max_after,
-                "is_drive": result.is_drive,
-            }
-        )
-
-    return out_rows, summaries, fixed_total, removed_total
+    return process_track(points, dedupe=dedupe)
 
 
 def validate_sep26_hint(summaries: Sequence[dict]) -> None:

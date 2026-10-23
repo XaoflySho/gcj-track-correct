@@ -25,6 +25,10 @@ MAX_JUMP_M = 700.0
 MATCH_ERR_M = 40.0
 MATCH_MARGIN_M = 15.0
 
+# Kinematic veto: raw step already matches speed×dt (not a frame change)
+MAX_LINK_DT_S = 40
+SAME_FRAME_ERR_M = 40.0
+
 # Closed W2G→G2W fills: keep interior continuous; length guarded mainly by
 # interior-step check (not a tiny point cap). Longer spans are OK when the
 # whole block is one frame (e.g. 2024-10-02 ~33 pts); mixed WGS interiors
@@ -156,6 +160,11 @@ def detect_switches(points: Sequence[TrackPoint]) -> List[SwitchEvent]:
         spd_a = max(a.speed, 0.0)
         spd_b = max(b.speed, 0.0)
         spd = (spd_a + spd_b) / 2.0
+        # Real motion along the GCJ-offset direction can land in 250–700 m
+        # (e.g. a 19 s highway step). If the raw length already matches
+        # speed×dt, this is not a frame switch.
+        if dt <= MAX_LINK_DT_S and abs(jump - spd * dt) < SAME_FRAME_ERR_M:
+            continue
         if j >= 2:
             ue, un = bearing_unit_en(points[j - 2], a)
         else:

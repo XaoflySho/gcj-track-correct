@@ -15,37 +15,20 @@ plus fixed regression cases.
 from __future__ import annotations
 
 import argparse
-import csv
 import sys
 from pathlib import Path
 from typing import List, Sequence, Tuple
 
 from lib.detect import TrackPoint, fmt_cst
+from lib.dol_io import load_dol_csv
 from lib.qa_anchors import Anchor, discover_stay_anchors, merge_anchors
 from lib.qa_cases import run_regression_cases
 from lib.qa_checks import CheckResult, run_standard_checks, suspicious_segments
 
 
 def load_csv(path: Path) -> List[TrackPoint]:
-    points: List[TrackPoint] = []
-    with path.open(newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        if not reader.fieldnames:
-            raise SystemExit(f"Empty or invalid CSV: {path}")
-        for i, row in enumerate(reader):
-            points.append(
-                TrackPoint(
-                    index=i,
-                    t=int(row["dataTime"]),
-                    lon=float(row["longitude"]),
-                    lat=float(row["latitude"]),
-                    speed=float(row["speed"]),
-                    accuracy=float(row["accuracy"]),
-                    altitude=float(row["altitude"]),
-                    raw=dict(row),
-                )
-            )
-    return points
+    """Load 一生足迹 (dataTime) or 人生点点/DoL (timestamp) CSV."""
+    return load_dol_csv(path)
 
 
 def parse_home(value: str) -> Tuple[float, float]:
@@ -136,7 +119,7 @@ def build_report(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="QA for GCJ-corrected 一生足迹 trajectory CSVs."
+        description="QA for GCJ-corrected trajectory CSVs (dataTime or timestamp)."
     )
     parser.add_argument("--original", "-o", type=Path, required=True)
     parser.add_argument("--corrected", "-c", type=Path, required=True)

@@ -6,14 +6,16 @@
 - **一生足迹 CLI**：`correct_tracks.py`（列含 `dataTime`）
 - **人生点点 / DoL**：`correct_dol.py`（列含 `timestamp`）
 
+两种导出共用一套判定：驾车段上的 WGS/GCJ 切换检测，加上「距离已等于速度×时间则不标成换坐标系」的否决。表头只决定读入列名、报告文案，以及人生点点是否再删侧向野点。
+
 ## 网页纠偏
 
 站点：<https://xaoflysho.github.io/gcj-track-correct/>
 
 在页面上选择 CSV，点「开始纠偏」，再点「下载结果」得到 zip（内含 `*_corrected.csv` 与 `*_report.md`）。按表头自动识别：
 
-- **一生足迹**：含 `dataTime`，算法与 `correct_tracks.py` 一致
-- **人生点点 / DoL**：含 `timestamp`，算法与 `correct_dol.py` 一致（车速×时间连续性，可删侧向野点）
+- **一生足迹**：含 `dataTime`，默认去掉转换后几乎重合的点
+- **人生点点 / DoL**：含 `timestamp`，同一套判定；默认不去近重，可删侧向野点
 
 可在 OpenStreetMap（WGS-84）上对比原始/纠偏轨迹：默认显示整份文件，超过 31 天则从开头截取 31 天。点击轨迹或空心删除点，可用底部工具手动改点、删除或恢复。
 
@@ -67,7 +69,7 @@ python correct_tracks.py \
 
 ## 人生点点 / DoL 导出
 
-DoL CSV 列名为 `timestamp,longitude,latitude,...`（不是 `dataTime`），混点形态也不同，请用专用入口（**不要**对 DoL 跑 `correct_tracks.py`）：
+DoL CSV 列名为 `timestamp,longitude,latitude,...`（不是 `dataTime`）。判定与一生足迹相同，入口按列名选择：
 
 ```bash
 python correct_dol.py \
@@ -78,9 +80,9 @@ python correct_dol.py \
 输出：
 
 - `output/<原文件名>_corrected.csv` — 保留全部原列，仅改判定为 GCJ 的经纬度；可删除侧向野点
-- `output/<原文件名>_report.md` — GCJ 块起止、转换/删除点数、残留警告
+- `output/<原文件名>_report.md` — 行程摘要、GCJ 块起止、转换/删除点数、残留警告
 
-检测按驾车段的 **车速×时间** 连续性标注 GCJ 块并 `gcj02_to_wgs84`；主体假定为 WGS-84。地图预览（网页或 `view_tracks.py`）已同时支持 `timestamp` 与 `dataTime`。
+`qa_tracks.py` 与地图预览（网页或 `view_tracks.py`）同时支持 `timestamp` 与 `dataTime`。
 
 ## 自动 QA（推荐纠偏后跑）
 
@@ -137,6 +139,8 @@ python qa_tracks.py \
 - 主体坐标系按 **WGS-84** 处理；仅将判定为 GCJ 的点做 `gcj02_to_wgs84`
 - 转换使用 PyPI 包 [`coordTransform`](https://pypi.org/project/coordtransform/)（按点计算，非固定偏移）
 - 检测覆盖：逐点交错、短时整段切换，以及高置信度的长间歇切换（停车后再以另一数据源恢复）
+- 相邻点在 40 秒内且原始距离已等于 `速度×时间`（约 40 m 以内）时，不把这一步当成换坐标系
+- 人生点点在共用判定之后，会把相邻 GCJ 块之间漏标的点按速度×时间补上，并删除侧向野点
 - 标注偏保守：
   - 成对 `W→G`/`G→W` 仅在短且内部连续的闭区间填充；两端尖峰、中间仍是 WGS 的长跨度（如 1/16）不会整段误转
   - 不会因段首一次 `G→W` 就把从起点起的整段都标成 GCJ（如 6/12）

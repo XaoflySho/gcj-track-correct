@@ -12,10 +12,14 @@ function opt(name, fallback) {
 
 const input = opt("--input") || opt("-i");
 const outDir = opt("--output-dir") || opt("-o") || "output";
-const dedupe = !args.includes("--no-dedupe");
+let dedupe;
+if (args.includes("--no-dedupe")) dedupe = false;
+else if (args.includes("--dedupe")) dedupe = true;
 
 if (!input) {
-  console.error("Usage: node scripts/run_js_correct.mjs --input FILE [--output-dir DIR]");
+  console.error(
+    "Usage: node scripts/run_js_correct.mjs --input FILE [--output-dir DIR] [--dedupe|--no-dedupe]"
+  );
   process.exit(1);
 }
 

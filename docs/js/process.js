@@ -8,7 +8,13 @@ import {
   pathStats,
   segmentIndices,
 } from "./detect.js";
-import { processDolTrack, summarizeRuns } from "./detect_dol.js";
+import {
+  fillGcjByKinematics,
+  findLateralSpikeIndices,
+  gcjRunsFromLabels,
+  residualWarnJumps,
+  summarizeRuns,
+} from "./detect_dol.js";
 
 function format1(n) {
   return n.toFixed(1);
@@ -84,23 +90,16 @@ export function buildReport(
   return lines.join("\n");
 }
 
-export function processPoints(points, dedupe = true, onProgress) {
+export function labelSegments(points, onProgress) {
   const times = points.map((p) => p.t);
   const segsIdx = segmentIndices(times);
   const anchors = discoverStayAnchors(points);
-
-  const outRows = [];
-  const summaries = [];
-  let fixedTotal = 0;
-  let removedTotal = 0;
+  const segs = [];
 
   for (let si = 0; si < segsIdx.length; si++) {
     const idxs = segsIdx[si];
     const segPoints = idxs.map((i) => points[i]);
     const result = analyzeSegment(segPoints);
-
-    const beforeCoords = segPoints.map((p) => [p.lon, p.lat]);
-    const [, , maxBefore] = pathStats(beforeCoords);
 
     let labels = result.labels.slice();
     if (anchors.length && result.gcj_count > 0) {
@@ -121,45 +120,89 @@ export function processPoints(points, dedupe = true, onProgress) {
       }
     }
 
-    let gcjCount = 0;
-    for (const lab of labels) if (lab === "G") gcjCount += 1;
-
-    let corrected;
-    let fixed = 0;
-    let removed = [];
-    if (result.is_drive && gcjCount > 0) {
-      [corrected, fixed, removed] = correctPoints(segPoints, labels, dedupe);
-    } else {
-      corrected = segPoints;
-    }
-
-    const afterCoords = corrected.map((p) => [p.lon, p.lat]);
-    const [, , maxAfter] = pathStats(afterCoords);
-
-    fixedTotal += fixed;
-    removedTotal += removed.length;
-    for (const p of corrected) outRows.push(p.raw);
-
-    summaries.push({
-      t0: fmtCst(result.t0),
-      t1: fmtCst(result.t1),
-      n_in: segPoints.length,
-      n_out: corrected.length,
-      fixed,
-      removed: removed.length,
-      switches: result.switches.length,
-      max_spd: result.max_speed,
-      max_before: maxBefore,
-      max_after: maxAfter,
-      is_drive: result.is_drive,
-    });
+    segs.push({ idxs, points: segPoints, result, labels });
 
     if (onProgress && (si % 8 === 0 || si === segsIdx.length - 1)) {
       onProgress({ processed: si + 1, total: segsIdx.length });
     }
   }
 
-  return { outRows, summaries, fixedTotal, removedTotal };
+  return segs;
+}
+
+export function applyCorrections(segs, dedupe = true, dropIndices) {
+  const dropSet = new Set(dropIndices || []);
+  const outRows = [];
+  const correctedPoints = [];
+  const summaries = [];
+  const removedAll = [];
+  let fixedTotal = 0;
+
+  for (const seg of segs) {
+    const beforeCoords = seg.points.map((p) => [p.lon, p.lat]);
+    const [, , maxBefore] = pathStats(beforeCoords);
+
+    const keepPoints = [];
+    const keepLabels = [];
+    const dropped = [];
+    for (let i = 0; i < seg.points.length; i++) {
+      const p = seg.points[i];
+      if (dropSet.has(p.index)) {
+        dropped.push(p.index);
+        continue;
+      }
+      keepPoints.push(p);
+      keepLabels.push(seg.labels[i]);
+    }
+
+    let gcjCount = 0;
+    for (const lab of keepLabels) if (lab === "G") gcjCount += 1;
+
+    let corrected;
+    let fixed = 0;
+    let removed = [];
+    if (seg.result.is_drive && gcjCount > 0) {
+      [corrected, fixed, removed] = correctPoints(keepPoints, keepLabels, dedupe);
+    } else {
+      corrected = keepPoints;
+    }
+    removed = dropped.concat(removed);
+
+    const afterCoords = corrected.map((p) => [p.lon, p.lat]);
+    const [, , maxAfter] = pathStats(afterCoords);
+
+    fixedTotal += fixed;
+    removedAll.push(...removed);
+    for (const p of corrected) {
+      outRows.push(p.raw);
+      correctedPoints.push(p);
+    }
+
+    summaries.push({
+      t0: fmtCst(seg.result.t0),
+      t1: fmtCst(seg.result.t1),
+      n_in: seg.points.length,
+      n_out: corrected.length,
+      fixed,
+      removed: removed.length,
+      switches: seg.result.switches.length,
+      max_spd: seg.result.max_speed,
+      max_before: maxBefore,
+      max_after: maxAfter,
+      is_drive: seg.result.is_drive,
+    });
+  }
+
+  return { outRows, correctedPoints, summaries, fixedTotal, removed: removedAll };
+}
+
+export function processPoints(points, dedupe = true, onProgress) {
+  const segs = labelSegments(points, onProgress);
+  const { outRows, summaries, fixedTotal, removed } = applyCorrections(
+    segs,
+    dedupe
+  );
+  return { outRows, summaries, fixedTotal, removedTotal: removed.length };
 }
 
 export function buildDolReport(
@@ -169,7 +212,8 @@ export function buildDolReport(
   fixed,
   removed,
   runLines,
-  warnLines
+  warnLines,
+  segSummaries
 ) {
   const lines = [
     "# 人生点点（DoL）轨迹纠偏报告",
@@ -180,9 +224,32 @@ export function buildDolReport(
     `- GCJ→WGS 转换点数：**${fixed}**`,
     `- 侧向野点删除：**${removed.length}**`,
     "",
-    "## GCJ 块（已转换）",
+    "## 发生纠偏的行程",
     "",
   ];
+
+  const correctedSegs = (segSummaries || []).filter(
+    (s) => s.fixed > 0 || s.removed > 0
+  );
+  if (!correctedSegs.length) {
+    lines.push("_未检测到 GCJ 污染。_");
+  } else {
+    lines.push(
+      "| 开始（CST） | 结束 | 输入点数 | 输出点数 | 转换 | 删除 | " +
+        "切换次数 | 最高速 m/s | 最大步进 修前→修后 |"
+    );
+    lines.push("|---|---|---:|---:|---:|---:|---:|---:|---|");
+    const sorted = correctedSegs.slice().sort((a, b) => b.fixed - a.fixed);
+    for (const s of sorted) {
+      lines.push(
+        `| ${s.t0} | ${s.t1} | ${s.n_in} | ${s.n_out} | ` +
+          `${s.fixed} | ${s.removed} | ${s.switches} | ` +
+          `${format1(s.max_spd)} | ${format0(s.max_before)}→${format0(s.max_after)} m |`
+      );
+    }
+  }
+
+  lines.push("", "## GCJ 块（已转换）", "");
   if (!runLines.length) lines.push("_未检测到 GCJ 污染。_");
   else for (const line of runLines) lines.push(`- ${line}`);
 
@@ -203,39 +270,41 @@ export function buildDolReport(
 }
 
 export function processCsvText(text, options = {}) {
-  const dedupe = options.dedupe !== false;
   const inputName = options.inputName || "input.csv";
   const onProgress = options.onProgress;
   const { points, fieldnames, format, timeKey } = parseCsv(text);
+  const defaultDedupe = format !== "dol";
+  const dedupe =
+    options.dedupe === undefined ? defaultDedupe : options.dedupe !== false;
 
   if (format === "dol") {
-    const { corrected, fixed, removed, runs, warns } = processDolTrack(
-      points,
-      onProgress
-    );
-    const outRows = corrected.map((p) => p.raw);
-    const runLines = summarizeRuns(runs);
-    const warnLines = warns.map(
+    const segs = labelSegments(points, onProgress);
+    let globalLabels = Array(points.length).fill("U");
+    for (const seg of segs) {
+      for (let i = 0; i < seg.idxs.length; i++) {
+        globalLabels[seg.idxs[i]] = seg.labels[i];
+      }
+    }
+    globalLabels = fillGcjByKinematics(points, globalLabels);
+    for (const seg of segs) {
+      for (let i = 0; i < seg.idxs.length; i++) {
+        seg.labels[i] = globalLabels[seg.idxs[i]];
+      }
+    }
+    const drop = findLateralSpikeIndices(points, globalLabels);
+    const { outRows, correctedPoints, summaries, fixedTotal, removed } =
+      applyCorrections(segs, dedupe, drop);
+    const runLines = summarizeRuns(gcjRunsFromLabels(points, globalLabels));
+    const warnLines = residualWarnJumps(correctedPoints).map(
       (w) =>
         `${fmtCst(w.t)}  步进 ${format0(w.jump_m)} m（期望约 ${format0(w.expect_m)} m）— ${w.note}`
     );
-    const summaries = runs.map((r) => ({
-      t0: fmtCst(r.t0),
-      t1: fmtCst(r.t1),
-      n_in: r.n,
-      n_out: r.n,
-      fixed: r.n,
-      removed: 0,
-      switches: 0,
-      max_spd: 0,
-      is_drive: true,
-    }));
     return {
       format: "dol",
       inputName,
       totalIn: points.length,
       totalOut: outRows.length,
-      fixedTotal: fixed,
+      fixedTotal,
       removedTotal: removed.length,
       summaries,
       dolRuns: runLines,
@@ -244,10 +313,11 @@ export function processCsvText(text, options = {}) {
         inputName,
         points.length,
         outRows.length,
-        fixed,
+        fixedTotal,
         removed,
         runLines,
-        warnLines
+        warnLines,
+        summaries
       ),
       fieldnames,
       timeKey,

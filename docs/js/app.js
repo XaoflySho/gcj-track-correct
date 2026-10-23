@@ -109,7 +109,7 @@ function renderStats(result) {
     `<p>GCJ→WGS 转换 <b>${result.fixedTotal}</b> · ${removedLabel} <b>${result.removedTotal}</b></p>`;
 }
 
-function renderDolTables(result) {
+function renderDolExtras(result) {
   let html = `<div class="section-title">GCJ 块（已转换）</div>`;
   if (!result.dolRuns.length) {
     html += `<p class="hint">未检测到 GCJ 污染。</p>`;
@@ -130,14 +130,10 @@ function renderDolTables(result) {
     }
     html += `</ul>`;
   }
-  el.tables.innerHTML = html;
+  return html;
 }
 
 function renderTables(result) {
-  if (result.format === "dol") {
-    renderDolTables(result);
-    return;
-  }
   const summaries = result.summaries || [];
   const corrected = summaries
     .filter((s) => s.fixed > 0 || s.removed > 0)
@@ -183,6 +179,9 @@ function renderTables(result) {
       </tr>`;
     }
     html += `</tbody></table></div>`;
+  }
+  if (result.format === "dol") {
+    html += renderDolExtras(result);
   }
   el.tables.innerHTML = html;
 }
@@ -672,14 +671,15 @@ el.fileInput.addEventListener("change", () => {
   el.fileName.textContent = file.name;
   el.btnCorrect.disabled = false;
   peekFormat(file).then((fmt) => {
+    el.dedupeRow.classList.remove("hidden");
     if (fmt === "dol") {
-      el.dedupeRow.classList.add("hidden");
+      el.noDedupe.checked = true;
       setStatus("已识别为人生点点 / DoL。点击「开始纠偏」。");
     } else if (fmt === "footprint") {
-      el.dedupeRow.classList.remove("hidden");
+      el.noDedupe.checked = false;
       setStatus("已识别为一生足迹。点击「开始纠偏」。");
     } else {
-      el.dedupeRow.classList.remove("hidden");
+      el.noDedupe.checked = false;
       setStatus("已选择 " + file.name + "。点击「开始纠偏」（将按表头识别格式）。");
     }
   });

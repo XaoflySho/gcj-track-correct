@@ -13,6 +13,9 @@ export const MAX_JUMP_M = 700.0;
 export const MATCH_ERR_M = 40.0;
 export const MATCH_MARGIN_M = 15.0;
 
+export const MAX_LINK_DT_S = 40;
+export const SAME_FRAME_ERR_M = 40.0;
+
 export const MAX_PAIR_POINTS = 50;
 export const MAX_PAIR_DT_S = 600;
 
@@ -116,6 +119,9 @@ export function detectSwitches(points) {
     const spdA = Math.max(a.speed, 0.0);
     const spdB = Math.max(b.speed, 0.0);
     const spd = (spdA + spdB) / 2.0;
+    if (dt <= MAX_LINK_DT_S && Math.abs(jump - spd * dt) < SAME_FRAME_ERR_M) {
+      continue;
+    }
     let ue = 0.0;
     let un = 0.0;
     if (j >= 2) {

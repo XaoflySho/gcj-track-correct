@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Correct GCJ-02 contamination in 人生点点 (DoL) trajectory CSV exports.
 
-Assumes the bulk of points are WGS-84. Uses kinematic speed×dt continuity to
-label GCJ blocks (not the 一生足迹 switch detector).
+Uses the same W2G/G2W switch detector as correct_tracks.py (including the
+speed×dt kinematic veto), then drops lateral wild spikes.
 
     source .venv/bin/activate
     python correct_dol.py --input DoL_261017_7052pt.csv --output-dir output/
@@ -37,6 +37,7 @@ def build_report(
     removed: Sequence[int],
     run_lines: Sequence[str],
     warn_lines: Sequence[str],
+    seg_summaries: Sequence[dict],
 ) -> str:
     lines = [
         "# 人生点点（DoL）轨迹纠偏报告",
@@ -47,9 +48,26 @@ def build_report(
         f"- GCJ→WGS 转换点数：**{fixed}**",
         f"- 侧向野点删除：**{len(removed)}**",
         "",
-        "## GCJ 块（已转换）",
+        "## 发生纠偏的行程",
         "",
     ]
+    corrected_segs = [s for s in seg_summaries if s["fixed"] > 0 or s["removed"] > 0]
+    if not corrected_segs:
+        lines.append("_未检测到 GCJ 污染。_")
+    else:
+        lines.append(
+            "| 开始（CST） | 结束 | 输入点数 | 输出点数 | 转换 | 删除 | "
+            "切换次数 | 最高速 m/s | 最大步进 修前→修后 |"
+        )
+        lines.append("|---|---|---:|---:|---:|---:|---:|---:|---|")
+        for s in sorted(corrected_segs, key=lambda x: -x["fixed"]):
+            lines.append(
+                f"| {s['t0']} | {s['t1']} | {s['n_in']} | {s['n_out']} | "
+                f"{s['fixed']} | {s['removed']} | {s['switches']} | "
+                f"{s['max_spd']:.1f} | {s['max_before']:.0f}→{s['max_after']:.0f} m |"
+            )
+
+    lines.extend(["", "## GCJ 块（已转换）", ""])
     if not run_lines:
         lines.append("_未检测到 GCJ 污染。_")
     else:
@@ -111,7 +129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     points = load_dol_csv(input_path)
     print(f"Loaded {len(points)} points")
 
-    corrected, fixed, removed, runs, warns = process_dol_track(points)
+    corrected, fixed, removed, runs, warns, summaries = process_dol_track(points)
     run_lines = summarize_runs(runs)
     warn_lines = [
         f"{fmt_cst(w.t)}  步进 {w.jump_m:.0f} m（期望约 {w.expect_m:.0f} m）— {w.note}"
@@ -132,6 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         removed,
         run_lines,
         warn_lines,
+        summaries,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report, encoding="utf-8")
